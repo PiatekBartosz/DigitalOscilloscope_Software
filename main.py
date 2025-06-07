@@ -34,16 +34,16 @@ class Oscilloscope(QMainWindow):
                 margin: -4px 0;
                 border-radius: 7px;
             }
-            QRadioButton::indicator:checked {
-                background-color: #00ffff;
-                border: 1px solid #00dddd;
-            }
             QRadioButton::indicator {
                 width: 14px;
                 height: 14px;
                 border-radius: 7px;
                 border: 1px solid #aaa;
                 background-color: #444;
+            }
+            QRadioButton::indicator:checked {
+                background-color: #00ffff;
+                border: 1px solid #00dddd;
             }
         """)
 
@@ -87,6 +87,15 @@ class Oscilloscope(QMainWindow):
         controls_layout.addWidget(offset_label)
         controls_layout.addWidget(self.offset_slider)
 
+        # Trigger level
+        trigger_label = QLabel("Trigger Level")
+        self.trigger_slider = QSlider(Qt.Horizontal)
+        self.trigger_slider.setRange(-1500, 1500)
+        self.trigger_slider.setValue(0)
+        self.trigger_slider.valueChanged.connect(self.on_trigger_change)
+        controls_layout.addWidget(trigger_label)
+        controls_layout.addWidget(self.trigger_slider)
+
         # Coupling mode
         coupling_label = QLabel("Coupling")
         self.dc_radio = QRadioButton("DC")
@@ -99,15 +108,6 @@ class Oscilloscope(QMainWindow):
         controls_layout.addWidget(coupling_label)
         controls_layout.addWidget(self.dc_radio)
         controls_layout.addWidget(self.ac_radio)
-
-        # Trigger level
-        trigger_label = QLabel("Trigger Level")
-        self.trigger_slider = QSlider(Qt.Horizontal)
-        self.trigger_slider.setRange(-1500, 1500)
-        self.trigger_slider.setValue(0)
-        self.trigger_slider.valueChanged.connect(self.on_trigger_change)
-        controls_layout.addWidget(trigger_label)
-        controls_layout.addWidget(self.trigger_slider)
 
         controls_layout.addStretch()
 
