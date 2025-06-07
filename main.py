@@ -3,7 +3,7 @@ import numpy as np
 import pyqtgraph as pg
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QSlider, QCheckBox, QFrame
+    QLabel, QSlider, QRadioButton, QButtonGroup
 )
 from PyQt5.QtCore import Qt, QTimer
 
@@ -19,8 +19,9 @@ class Oscilloscope(QMainWindow):
         main_layout = QVBoxLayout()
         main_widget.setLayout(main_layout)
 
-        # Plot widget
+        # Plot widget with grid
         self.plotWidget = pg.PlotWidget()
+        self.plotWidget.showGrid(x=True, y=True, alpha=0.5)
         main_layout.addWidget(self.plotWidget)
         self.curve = self.plotWidget.plot(pen='y')
 
@@ -32,38 +33,46 @@ class Oscilloscope(QMainWindow):
         controls_layout = QHBoxLayout()
         main_layout.addLayout(controls_layout)
 
-        # Gain control (slider)
+        # Gain control
         gain_layout = QVBoxLayout()
         controls_layout.addLayout(gain_layout)
         gain_label = QLabel("Gain")
         self.gain_slider = QSlider(Qt.Horizontal)
-        self.gain_slider.setRange(1, 20)  # 0.1 to 2.0 gain scaled by 10
-        self.gain_slider.setValue(10)      # default 1.0
+        self.gain_slider.setRange(1, 20)
+        self.gain_slider.setValue(10)
         self.gain_slider.valueChanged.connect(self.on_gain_change)
         gain_layout.addWidget(gain_label)
         gain_layout.addWidget(self.gain_slider)
 
-        # Offset control (slider)
+        # Offset control
         offset_layout = QVBoxLayout()
         controls_layout.addLayout(offset_layout)
         offset_label = QLabel("Offset")
         self.offset_slider = QSlider(Qt.Horizontal)
-        self.offset_slider.setRange(-1000, 1000)  # offset in sample units
+        self.offset_slider.setRange(-1000, 1000)
         self.offset_slider.setValue(0)
         self.offset_slider.valueChanged.connect(self.on_offset_change)
         offset_layout.addWidget(offset_label)
         offset_layout.addWidget(self.offset_slider)
 
-        # AC/DC coupling checkbox
+        # AC/DC coupling radio buttons
         coupling_layout = QVBoxLayout()
         controls_layout.addLayout(coupling_layout)
-        coupling_label = QLabel("AC Coupling")
-        self.ac_coupling_checkbox = QCheckBox()
-        self.ac_coupling_checkbox.setChecked(False)
-        coupling_layout.addWidget(coupling_label)
-        coupling_layout.addWidget(self.ac_coupling_checkbox)
+        coupling_label = QLabel("Coupling")
+        self.dc_radio = QRadioButton("DC")
+        self.ac_radio = QRadioButton("AC")
+        self.dc_radio.setChecked(True)
 
-        # Trigger level slider
+        self.coupling_group = QButtonGroup()
+        self.coupling_group.addButton(self.dc_radio)
+        self.coupling_group.addButton(self.ac_radio)
+        self.coupling_group.buttonClicked.connect(self.on_coupling_change)
+
+        coupling_layout.addWidget(coupling_label)
+        coupling_layout.addWidget(self.dc_radio)
+        coupling_layout.addWidget(self.ac_radio)
+
+        # Trigger level
         trigger_layout = QVBoxLayout()
         controls_layout.addLayout(trigger_layout)
         trigger_label = QLabel("Trigger Level")
@@ -85,7 +94,7 @@ class Oscilloscope(QMainWindow):
         # Timer to update plot
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_plot)
-        self.timer.start(20)  # 50 FPS approx
+        self.timer.start(20)
 
     def on_gain_change(self):
         self.gain = self.gain_slider.value() / 10.0
@@ -97,27 +106,27 @@ class Oscilloscope(QMainWindow):
         self.trigger_level = self.trigger_slider.value()
         self.trigger_line.setValue(self.trigger_level)
 
+    def on_coupling_change(self, button):
+        self.ac_coupling = (button.text() == "AC")
+
     def update_plot(self):
-        # Generate mock sine wave + noise
+        # Generate mock signal
         t = np.linspace(0, 2*np.pi, self.data_len)
-        freq = 5  # Hz frequency
+        freq = 5
         sine_wave = np.sin(freq * t + self.ptr / 10)
         noise = np.random.normal(0, 0.1, self.data_len)
         samples = sine_wave + noise
 
         # Apply gain and offset
-        samples = samples * self.gain * 1000  # scale amplitude
-        samples = samples + self.offset
+        samples *= self.gain * 1000
+        samples += self.offset
 
-        # Apply AC coupling (remove DC offset)
-        if self.ac_coupling_checkbox.isChecked():
-            samples = samples - np.mean(samples)
+        # AC coupling
+        if self.ac_coupling:
+            samples -= np.mean(samples)
 
         self.curve.setData(samples)
-
-        # Update trigger line position (already done in slider callback)
         self.trigger_line.setValue(self.trigger_level)
-
         self.ptr += 1
 
 if __name__ == '__main__':
