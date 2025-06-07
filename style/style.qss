@@ -1,0 +1,27 @@
+QWidget {
+    background-color: #1e1e1e;
+    color: #eeeeee;
+    font-family: Consolas, monospace;
+    font-size: 12pt;
+}
+QDial {
+    background-color: #333;
+}
+QLineEdit {
+    background-color: #222;
+    color: #00ffff;
+    border: 1px solid #00dddd;
+    border-radius: 4px;
+    padding: 2px;
+}
+QRadioButton::indicator {
+    width: 14px;
+    height: 14px;
+    border-radius: 7px;
+    border: 1px solid #aaa;
+    background-color: #444;
+}
+QRadioButton::indicator:checked {
+    background-color: #00ffff;
+    border: 1px solid #00dddd;
+}
