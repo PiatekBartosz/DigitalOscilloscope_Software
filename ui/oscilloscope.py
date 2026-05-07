@@ -6,11 +6,12 @@ import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFrame,
-    QLabel, QComboBox, QRadioButton, QButtonGroup, QPushButton
+    QLabel, QComboBox, QRadioButton, QButtonGroup, QPushButton, QSplitter,
 )
 from PyQt6.QtCore import Qt, QTimer
 
 from utils.controls import create_dial_widget
+from ui.command_panel import CommandPanel
 
 ADC_COUNTS  = 16384
 ADC_VREF    = 5.0  
@@ -45,6 +46,8 @@ class Oscilloscope(QMainWindow):
         self.trigger_mode   = "Auto"
         self.ac_coupling    = False   # CH1
         self.ac_coupling_ch2 = False  # CH2
+        self.ch1_enabled    = True
+        self.ch2_enabled    = True
 
         self._timer = QTimer()
         self._timer.timeout.connect(self._update_plot)
@@ -52,7 +55,7 @@ class Oscilloscope(QMainWindow):
 
     def _build_ui(self):
         self.setWindowTitle("Oscilloscope")
-        self.resize(1100, 720)
+        self.resize(1100, 820)
         self.setWindowFlags(self.windowFlags() |
                             Qt.WindowType.WindowStaysOnTopHint)
 
@@ -64,9 +67,15 @@ class Oscilloscope(QMainWindow):
         except (FileNotFoundError, OSError):
             pass
 
-        central     = QWidget()
-        main_layout = QHBoxLayout(central)
+        central      = QWidget()
+        outer_layout = QVBoxLayout(central)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.setSpacing(0)
         self.setCentralWidget(central)
+
+        # ── top: plot + controls ──────────────────────────────────────────────
+        top_widget  = QWidget()
+        main_layout = QHBoxLayout(top_widget)
 
         self.plotWidget = pg.PlotWidget()
         self.plotWidget.showGrid(x=True, y=True, alpha=0.5)
@@ -183,11 +192,54 @@ class Oscilloscope(QMainWindow):
         self._run_btn.toggled.connect(self._toggle_run)
         ctrl_layout.addWidget(self._run_btn)
 
+        ch_row = QHBoxLayout()
+        self._ch1_btn = QPushButton("CH1: ON")
+        self._ch1_btn.setCheckable(True)
+        self._ch1_btn.setChecked(True)
+        self._ch1_btn.toggled.connect(self._on_ch1_toggle)
+        ch_row.addWidget(self._ch1_btn)
+        self._ch2_btn = QPushButton("CH2: ON")
+        self._ch2_btn.setCheckable(True)
+        self._ch2_btn.setChecked(True)
+        self._ch2_btn.toggled.connect(self._on_ch2_toggle)
+        ch_row.addWidget(self._ch2_btn)
+        ctrl_layout.addLayout(ch_row)
+
         ctrl_layout.addStretch()
+
+        # ── bottom: command console ───────────────────────────────────────────
+        self._cmd_panel = CommandPanel()
+        self._cmd_panel.command_submitted.connect(self._send)
+
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.addWidget(top_widget)
+        splitter.addWidget(self._cmd_panel)
+        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([600, 220])
+        outer_layout.addWidget(splitter)
+
+        # wire connection state + firmware replies → console log
+        if self._conn_mgr:
+            self._conn_mgr.connected.connect(
+                lambda: self._cmd_panel.log_ok("Connected"))
+            self._conn_mgr.disconnected.connect(
+                lambda: self._cmd_panel.log_error("Disconnected"))
+            self._conn_mgr.connecting.connect(
+                lambda: self._cmd_panel.log_info("Connecting…"))
+            self._conn_mgr.device_found.connect(
+                lambda addr: self._cmd_panel.log_ok(f"Device found: {addr}"))
+            self._conn_mgr.response_received.connect(self._on_firmware_response)
 
     def _send(self, cmd: str):
         if self._conn_mgr:
             self._conn_mgr.send_command(cmd)
+
+    def _on_firmware_response(self, line: str):
+        if line.startswith("ERR"):
+            self._cmd_panel.log_error(line)
+        else:
+            self._cmd_panel.log_ok(line)
 
     def _on_gain_change(self):
         self.gain = self._gain_dial.value() / 10.0
@@ -230,6 +282,16 @@ class Oscilloscope(QMainWindow):
         coupling = "ac" if button.text() == "AC" else "dc"
         self._send(f"afe trigger {coupling}")
 
+    def _on_ch1_toggle(self, checked: bool):
+        self.ch1_enabled = checked
+        self._ch1_btn.setText(f"CH1: {'ON' if checked else 'OFF'}")
+        self._curve_ch1.setVisible(checked)
+
+    def _on_ch2_toggle(self, checked: bool):
+        self.ch2_enabled = checked
+        self._ch2_btn.setText(f"CH2: {'ON' if checked else 'OFF'}")
+        self._curve_ch2.setVisible(checked)
+
     def _on_interleaved_change(self, checked: bool):
         self._interleaved_btn.setText(
             f"Interleaved: {'ON' if checked else 'OFF'}")
@@ -269,6 +331,8 @@ class Oscilloscope(QMainWindow):
         if self.ac_coupling_ch2:
             ch2 -= np.mean(ch2)
 
-        self._curve_ch1.setData(ch1)
-        self._curve_ch2.setData(ch2)
+        if self.ch1_enabled:
+            self._curve_ch1.setData(ch1)
+        if self.ch2_enabled:
+            self._curve_ch2.setData(ch2)
         self._trigger_line.setValue(self.trigger_level)

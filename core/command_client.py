@@ -3,23 +3,19 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-FRAME_SYNC  = bytes([0xAD, 0xC1])
-FRAME_LEN   = 6
-ADC_MASK    = 0x3FFF
+FRAME_SYNC = bytes([0xAD, 0xC1])
+FRAME_LEN  = 6
+ADC_MASK   = 0x3FFF
 
 
 class CommandClient:
-    def __init__(self, host: str, port: int, sample_cb=None):
-        """
-        host      : device IP address
-        port      : TCP port (8888)
-        sample_cb : callable(ch1: int, ch2: int) called for each ADC frame
-        """
-        self.host      = host
-        self.port      = port
-        self.sample_cb = sample_cb
-        self.writer    = None
-        self.connected = False
+    def __init__(self, host: str, port: int, sample_cb=None, text_cb=None):
+        self.host       = host
+        self.port       = port
+        self.sample_cb  = sample_cb
+        self.text_cb    = text_cb
+        self.writer     = None
+        self.connected  = False
         self._recv_task = None
 
     async def connect(self):
@@ -72,16 +68,32 @@ class CommandClient:
             self.connected = False
 
     def _parse_frames(self, buf: bytearray) -> bytearray:
-        """Extract all complete ADC frames from buf, call sample_cb for each."""
-        while len(buf) >= FRAME_LEN:
-            idx = buf.find(FRAME_SYNC)
-            if idx == -1:
-                buf = buf[-1:]
+        while True:
+            sync_idx = buf.find(FRAME_SYNC)
+            nl_idx   = buf.find(b'\n')
+
+            # Text line arrives before the next binary frame (or no frame yet)
+            if nl_idx != -1 and (sync_idx == -1 or nl_idx < sync_idx):
+                line = buf[:nl_idx].decode(errors='replace').strip()
+                del buf[:nl_idx + 1]
+                if line and self.text_cb:
+                    try:
+                        self.text_cb(line)
+                    except Exception as e:
+                        logger.error("text_cb error: %s", e)
+                continue
+
+            # No binary frame in buffer yet
+            if sync_idx == -1:
                 break
-            if idx > 0:
-                del buf[:idx]
+
+            # Discard leading bytes that aren't part of a frame
+            if sync_idx > 0:
+                del buf[:sync_idx]
+
             if len(buf) < FRAME_LEN:
                 break
+
             ch1 = ((buf[2] << 8) | buf[3]) & ADC_MASK
             ch2 = ((buf[4] << 8) | buf[5]) & ADC_MASK
             if self.sample_cb:
@@ -90,4 +102,5 @@ class CommandClient:
                 except Exception as e:
                     logger.error("sample_cb error: %s", e)
             del buf[:FRAME_LEN]
+
         return buf

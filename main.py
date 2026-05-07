@@ -15,8 +15,8 @@ logger = logging.getLogger()
 def parse_arguments():
     parser = argparse.ArgumentParser()
     parser.add_argument("-d", "--debug", action="store_true")
-    parser.add_argument("--ip", default=None,
-                        help="Device IP address (skips mDNS discovery)")
+    parser.add_argument("--ip", default="192.168.0.19",
+                        help="Device IP address")
     parser.add_argument("--port", type=int, default=8888)
     return parser.parse_args()
 
@@ -43,12 +43,13 @@ def main():
     loop_thread = threading.Thread(target=run_loop, daemon=True)
     loop_thread.start()
 
-    conn_mgr = ConnectionManager(sample_cb=on_sample)
-    conn_mgr.start(async_loop, ip=options.ip, port=options.port)
-
     app = QApplication(sys.argv)
+
+    conn_mgr = ConnectionManager(sample_cb=on_sample)
     osc = Oscilloscope(conn_mgr, sample_queue)
     osc.show()
+
+    conn_mgr.start(async_loop, ip=options.ip, port=options.port)
 
     ret = app.exec()
 
