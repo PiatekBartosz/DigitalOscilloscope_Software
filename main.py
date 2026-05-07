@@ -15,7 +15,7 @@ logger = logging.getLogger()
 def parse_arguments():
     parser = argparse.ArgumentParser()
     parser.add_argument("-d", "--debug", action="store_true")
-    parser.add_argument("--ip", default="192.168.0.19",
+    parser.add_argument("--ip", default="192.168.0.109",
                         help="Device IP address")
     parser.add_argument("--port", type=int, default=8888)
     return parser.parse_args()

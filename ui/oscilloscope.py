@@ -30,10 +30,8 @@ class Oscilloscope(QMainWindow):
         self._conn_mgr     = conn_mgr
         self._sample_queue = sample_queue
 
-        self._ch1_buf = deque([0.0] * self.DISPLAY_SAMPLES,
-                              maxlen=self.DISPLAY_SAMPLES)
-        self._ch2_buf = deque([0.0] * self.DISPLAY_SAMPLES,
-                              maxlen=self.DISPLAY_SAMPLES)
+        self._ch1_buf = deque(maxlen=self.DISPLAY_SAMPLES)
+        self._ch2_buf = deque(maxlen=self.DISPLAY_SAMPLES)
 
         self._build_ui()
 
@@ -178,8 +176,7 @@ class Oscilloscope(QMainWindow):
         ctrl_layout.addWidget(self._status_label)
 
         if self._conn_mgr:
-            self._conn_mgr.connected.connect(
-                lambda: self._status_label.setText("Connected"))
+            self._conn_mgr.connected.connect(self._on_connected)
             self._conn_mgr.disconnected.connect(
                 lambda: self._status_label.setText("Disconnected"))
             self._conn_mgr.connecting.connect(
@@ -230,6 +227,11 @@ class Oscilloscope(QMainWindow):
             self._conn_mgr.device_found.connect(
                 lambda addr: self._cmd_panel.log_ok(f"Device found: {addr}"))
             self._conn_mgr.response_received.connect(self._on_firmware_response)
+
+    def _on_connected(self):
+        self._ch1_buf.clear()
+        self._ch2_buf.clear()
+        self._status_label.setText("Connected")
 
     def _send(self, cmd: str):
         if self._conn_mgr:

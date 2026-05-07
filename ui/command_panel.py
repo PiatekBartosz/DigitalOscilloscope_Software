@@ -27,6 +27,8 @@ _PRESETS = [
     ("Trigger DC", "afe trigger dc"),
     ("Interleaved ON", "afe interleaved 1"),
     ("Interleaved OFF", "afe interleaved 0"),
+    ("ADC Mock ON", "afe mock_adc 1"),
+    ("ADC Mock OFF", "afe mock_adc 0"),
 ]
 
 

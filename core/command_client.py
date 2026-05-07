@@ -3,9 +3,14 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-FRAME_SYNC = bytes([0xAD, 0xC1])
-FRAME_LEN  = 6
-ADC_MASK   = 0x3FFF
+# Binary frame format (big-endian):
+#   [0xAD][0xC1]           2 bytes  sync
+#   [seq3..seq0]           4 bytes  uint32 waveform sequence number
+#   [cnt1][cnt0]           2 bytes  uint16 sample count N
+#   [N × (ch1_hi ch1_lo ch2_hi ch2_lo)]  N*4 bytes  samples
+FRAME_SYNC       = bytes([0xAD, 0xC1])
+FRAME_HEADER_LEN = 8
+ADC_MASK         = 0x3FFF
 
 
 class CommandClient:
@@ -17,11 +22,13 @@ class CommandClient:
         self.writer     = None
         self.connected  = False
         self._recv_task = None
+        self._last_seq  = None
 
     async def connect(self):
         reader, writer = await asyncio.open_connection(self.host, self.port)
         self.writer    = writer
         self.connected = True
+        self._last_seq = None
         logger.info("Connected to %s:%d", self.host, self.port)
         self._recv_task = asyncio.create_task(self._receive_loop(reader))
 
@@ -55,7 +62,7 @@ class CommandClient:
         buf = bytearray()
         try:
             while True:
-                chunk = await reader.read(256)
+                chunk = await reader.read(4096)
                 if not chunk:
                     break
                 buf.extend(chunk)
@@ -72,7 +79,7 @@ class CommandClient:
             sync_idx = buf.find(FRAME_SYNC)
             nl_idx   = buf.find(b'\n')
 
-            # Text line arrives before the next binary frame (or no frame yet)
+            # Text reply arrives before the next binary frame (or no frame yet)
             if nl_idx != -1 and (sync_idx == -1 or nl_idx < sync_idx):
                 line = buf[:nl_idx].decode(errors='replace').strip()
                 del buf[:nl_idx + 1]
@@ -83,24 +90,44 @@ class CommandClient:
                         logger.error("text_cb error: %s", e)
                 continue
 
-            # No binary frame in buffer yet
             if sync_idx == -1:
                 break
 
-            # Discard leading bytes that aren't part of a frame
+            # Discard bytes before sync
             if sync_idx > 0:
                 del buf[:sync_idx]
 
-            if len(buf) < FRAME_LEN:
+            # Wait for full header
+            if len(buf) < FRAME_HEADER_LEN:
                 break
 
-            ch1 = ((buf[2] << 8) | buf[3]) & ADC_MASK
-            ch2 = ((buf[4] << 8) | buf[5]) & ADC_MASK
+            seq   = (buf[2] << 24) | (buf[3] << 16) | (buf[4] << 8) | buf[5]
+            count = (buf[6] << 8) | buf[7]
+            frame_len = FRAME_HEADER_LEN + count * 4
+
+            # Wait for full payload
+            if len(buf) < frame_len:
+                break
+
+            # Detect dropped waveforms
+            if self._last_seq is not None:
+                expected = (self._last_seq + 1) & 0xFFFFFFFF
+                if seq != expected:
+                    dropped = (seq - self._last_seq - 1) & 0xFFFFFFFF
+                    logger.warning("Dropped %d waveform(s): seq %d -> %d", dropped, self._last_seq, seq)
+            self._last_seq = seq
+
+            # Deliver samples
             if self.sample_cb:
-                try:
-                    self.sample_cb(ch1, ch2)
-                except Exception as e:
-                    logger.error("sample_cb error: %s", e)
-            del buf[:FRAME_LEN]
+                for i in range(count):
+                    offset = FRAME_HEADER_LEN + i * 4
+                    ch1 = ((buf[offset]     << 8) | buf[offset + 1]) & ADC_MASK
+                    ch2 = ((buf[offset + 2] << 8) | buf[offset + 3]) & ADC_MASK
+                    try:
+                        self.sample_cb(ch1, ch2)
+                    except Exception as e:
+                        logger.error("sample_cb error: %s", e)
+
+            del buf[:frame_len]
 
         return buf
