@@ -1,6 +1,6 @@
+import logging
 import os
 import queue
-from collections import deque
 
 import numpy as np
 import pyqtgraph as pg
@@ -13,25 +13,26 @@ from PyQt6.QtCore import Qt, QTimer
 from utils.controls import create_dial_widget
 from ui.command_panel import CommandPanel
 
+logger = logging.getLogger(__name__)
+
 ADC_COUNTS  = 16384
-ADC_VREF    = 5.0  
+ADC_VREF    = 5.0
 
 
-def _raw_to_volts(raw: int) -> float:
-    """Convert 14-bit offset-binary ADC code to volts."""
-    return (raw - ADC_COUNTS / 2) / (ADC_COUNTS / 2) * ADC_VREF
+def _raw_to_volts(raw: np.ndarray) -> np.ndarray:
+    return (raw.astype(np.float32) - ADC_COUNTS / 2) / (ADC_COUNTS / 2) * ADC_VREF
 
 
 class Oscilloscope(QMainWindow):
-    DISPLAY_SAMPLES = 1024
+    DISPLAY_SAMPLES = 8192
 
-    def __init__(self, conn_mgr, sample_queue: queue.Queue):
+    def __init__(self, conn_mgr, frame_queue: queue.Queue):
         super().__init__()
-        self._conn_mgr     = conn_mgr
-        self._sample_queue = sample_queue
+        self._conn_mgr   = conn_mgr
+        self._frame_queue = frame_queue
 
-        self._ch1_buf = deque(maxlen=self.DISPLAY_SAMPLES)
-        self._ch2_buf = deque(maxlen=self.DISPLAY_SAMPLES)
+        self._ch1_data = np.zeros(self.DISPLAY_SAMPLES, dtype=np.float32)
+        self._ch2_data = np.zeros(self.DISPLAY_SAMPLES, dtype=np.float32)
 
         self._build_ui()
 
@@ -40,13 +41,13 @@ class Oscilloscope(QMainWindow):
         self.trigger_level  = 0.0
         self.timebase       = 10
         self.vpos           = 0.0
-        self.running        = True
         self.trigger_mode   = "Auto"
         self.ac_coupling    = False   # CH1
         self.ac_coupling_ch2 = False  # CH2
         self.ch1_enabled    = True
         self.ch2_enabled    = True
 
+        # Display refresh timer — always running; acquisition is driven separately.
         self._timer = QTimer()
         self._timer.timeout.connect(self._update_plot)
         self._timer.start(20)
@@ -177,17 +178,23 @@ class Oscilloscope(QMainWindow):
 
         if self._conn_mgr:
             self._conn_mgr.connected.connect(self._on_connected)
-            self._conn_mgr.disconnected.connect(
-                lambda: self._status_label.setText("Disconnected"))
+            self._conn_mgr.disconnected.connect(self._on_disconnected)
             self._conn_mgr.connecting.connect(
                 lambda: self._status_label.setText("Connecting…"))
             self._conn_mgr.device_found.connect(
                 lambda addr: self._status_label.setText(f"Found: {addr}"))
+            self._conn_mgr.acquisition_done.connect(self._on_acquisition_done)
 
-        self._run_btn = QPushButton("Stop")
+        acq_row = QHBoxLayout()
+        self._run_btn = QPushButton("Run")
         self._run_btn.setCheckable(True)
         self._run_btn.toggled.connect(self._toggle_run)
-        ctrl_layout.addWidget(self._run_btn)
+        acq_row.addWidget(self._run_btn)
+
+        self._single_btn = QPushButton("Single")
+        self._single_btn.clicked.connect(self._single_acquire)
+        acq_row.addWidget(self._single_btn)
+        ctrl_layout.addLayout(acq_row)
 
         ch_row = QHBoxLayout()
         self._ch1_btn = QPushButton("CH1: ON")
@@ -227,15 +234,32 @@ class Oscilloscope(QMainWindow):
             self._conn_mgr.device_found.connect(
                 lambda addr: self._cmd_panel.log_ok(f"Device found: {addr}"))
             self._conn_mgr.response_received.connect(self._on_firmware_response)
+            self._conn_mgr.acquisition_done.connect(
+                lambda: self._cmd_panel.log_info("Single acquisition complete"))
 
     def _on_connected(self):
-        self._ch1_buf.clear()
-        self._ch2_buf.clear()
+        self._ch1_data[:] = 0
+        self._ch2_data[:] = 0
         self._status_label.setText("Connected")
+        self._run_btn.setEnabled(True)
+        self._single_btn.setEnabled(True)
+
+    def _on_disconnected(self):
+        self._status_label.setText("Disconnected")
+        # If the connection drops, reset acquisition buttons to idle state.
+        self._run_btn.setChecked(False)
+        self._run_btn.setText("Run")
+        self._single_btn.setEnabled(True)
 
     def _send(self, cmd: str):
+        logger.info("CMD: %s", cmd)
         if self._conn_mgr:
             self._conn_mgr.send_command(cmd)
+
+    def _send_control(self, cmd: str):
+        """Send a command triggered by a UI control and echo it to the console."""
+        self._cmd_panel.log_cmd(cmd)
+        self._send(cmd)
 
     def _on_firmware_response(self, line: str):
         if line.startswith("ERR"):
@@ -265,24 +289,24 @@ class Oscilloscope(QMainWindow):
     def _on_coupling_change(self, button):
         coupling = "ac" if button.text() == "AC" else "dc"
         self.ac_coupling = (coupling == "ac")
-        self._send(f"afe coupling 1 {coupling}")
+        self._send_control(f"afe coupling 1 {coupling}")
 
     def _on_attenuation_change(self, button):
         atten = "100" if button.text() == "1:100" else "1"
-        self._send(f"afe atten 1 {atten}")
+        self._send_control(f"afe atten 1 {atten}")
 
     def _on_ch2_coupling_change(self, button):
         coupling = "ac" if button.text() == "AC" else "dc"
         self.ac_coupling_ch2 = (coupling == "ac")
-        self._send(f"afe coupling 2 {coupling}")
+        self._send_control(f"afe coupling 2 {coupling}")
 
     def _on_ch2_attenuation_change(self, button):
         atten = "100" if button.text() == "1:100" else "1"
-        self._send(f"afe atten 2 {atten}")
+        self._send_control(f"afe atten 2 {atten}")
 
     def _on_trigger_coupling_change(self, button):
         coupling = "ac" if button.text() == "AC" else "dc"
-        self._send(f"afe trigger {coupling}")
+        self._send_control(f"afe trigger {coupling}")
 
     def _on_ch1_toggle(self, checked: bool):
         self.ch1_enabled = checked
@@ -297,41 +321,51 @@ class Oscilloscope(QMainWindow):
     def _on_interleaved_change(self, checked: bool):
         self._interleaved_btn.setText(
             f"Interleaved: {'ON' if checked else 'OFF'}")
-        self._send(f"afe interleaved {1 if checked else 0}")
+        self._send_control(f"afe interleaved {1 if checked else 0}")
 
     def _toggle_run(self, checked: bool):
-        self.running = not checked
         if checked:
-            self._timer.stop()
-            self._run_btn.setText("Run")
-        else:
-            self._timer.start(20)
             self._run_btn.setText("Stop")
+            self._single_btn.setEnabled(False)
+            if self._conn_mgr:
+                self._conn_mgr.start_acquisition("continuous")
+        else:
+            self._run_btn.setText("Run")
+            self._single_btn.setEnabled(True)
+            if self._conn_mgr:
+                self._conn_mgr.stop_acquisition()
+
+    def _single_acquire(self):
+        if self._conn_mgr:
+            self._single_btn.setEnabled(False)
+            self._status_label.setText("Acquiring…")
+            self._conn_mgr.start_acquisition("single")
+
+    def _on_acquisition_done(self):
+        self._single_btn.setEnabled(True)
+        self._status_label.setText("Connected")
 
     def _update_plot(self):
-        if not self.running:
-            return
-
-        drained = 0
-        while drained < 512:
+        # Drain queue and keep only the latest frame (newest-wins for live display)
+        latest = None
+        while True:
             try:
-                ch1_raw, ch2_raw = self._sample_queue.get_nowait()
-                self._ch1_buf.append(_raw_to_volts(ch1_raw))
-                self._ch2_buf.append(_raw_to_volts(ch2_raw))
-                drained += 1
+                latest = self._frame_queue.get_nowait()
             except queue.Empty:
                 break
 
-        ch1 = np.array(self._ch1_buf, dtype=np.float32)
-        ch2 = np.array(self._ch2_buf, dtype=np.float32)
+        if latest is not None:
+            ch1_raw, ch2_raw = latest
+            self._ch1_data = _raw_to_volts(ch1_raw)
+            self._ch2_data = _raw_to_volts(ch2_raw)
 
-        ch1 = ch1 * self.gain + self.offset + self.vpos
-        ch2 = ch2 * self.gain + self.offset + self.vpos
+        ch1 = self._ch1_data * self.gain + self.offset + self.vpos
+        ch2 = self._ch2_data * self.gain + self.offset + self.vpos
 
-        if self.ac_coupling:
-            ch1 -= np.mean(ch1)
-        if self.ac_coupling_ch2:
-            ch2 -= np.mean(ch2)
+        if self.ac_coupling and len(ch1):
+            ch1 = ch1 - np.mean(ch1)
+        if self.ac_coupling_ch2 and len(ch2):
+            ch2 = ch2 - np.mean(ch2)
 
         if self.ch1_enabled:
             self._curve_ch1.setData(ch1)

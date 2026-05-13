@@ -145,6 +145,10 @@ class CommandPanel(QWidget):
 
     # ── public API ────────────────────────────────────────────────────────────
 
+    def log_cmd(self, cmd: str):
+        """Echo an outgoing command (cyan, same style as manually typed ones)."""
+        self._append_log(f"> {cmd}", "#00ffff")
+
     def log_info(self, msg: str):
         self._append_log(msg, "#aaaaaa")
 

@@ -1,6 +1,8 @@
 import asyncio
 import logging
 
+import numpy as np
+
 logger = logging.getLogger(__name__)
 
 # Binary frame format (big-endian):
@@ -14,13 +16,13 @@ ADC_MASK         = 0x3FFF
 
 
 class CommandClient:
-    def __init__(self, host: str, port: int, sample_cb=None, text_cb=None):
-        self.host       = host
-        self.port       = port
-        self.sample_cb  = sample_cb
-        self.text_cb    = text_cb
-        self.writer     = None
-        self.connected  = False
+    def __init__(self, host: str, port: int, frame_cb=None, text_cb=None):
+        self.host      = host
+        self.port      = port
+        self.frame_cb  = frame_cb
+        self.text_cb   = text_cb
+        self.writer    = None
+        self.connected = False
         self._recv_task = None
         self._last_seq  = None
 
@@ -50,10 +52,12 @@ class CommandClient:
 
     async def send_command(self, cmd: str):
         if not self.connected or not self.writer:
+            logger.warning("Cannot send '%s': not connected", cmd)
             return
         try:
             self.writer.write(cmd.encode() + b'\n')
             await self.writer.drain()
+            logger.info("Sent: %s", cmd)
         except Exception as e:
             logger.error("Send error: %s", e)
             self.connected = False
@@ -62,9 +66,13 @@ class CommandClient:
         buf = bytearray()
         try:
             while True:
-                chunk = await reader.read(4096)
+                # 64 KB chunks — fits a full 32 KB waveform frame in one or two reads
+                chunk = await reader.read(65536)
                 if not chunk:
+                    logger.info("Connection closed by remote")
                     break
+                logger.debug("TCP chunk: %d bytes (buf now %d bytes)",
+                             len(chunk), len(buf) + len(chunk))
                 buf.extend(chunk)
                 buf = self._parse_frames(buf)
         except asyncio.CancelledError:
@@ -79,34 +87,45 @@ class CommandClient:
             sync_idx = buf.find(FRAME_SYNC)
             nl_idx   = buf.find(b'\n')
 
-            # Text reply arrives before the next binary frame (or no frame yet)
+            # Text reply before the next binary frame (or no frame yet)
             if nl_idx != -1 and (sync_idx == -1 or nl_idx < sync_idx):
                 line = buf[:nl_idx].decode(errors='replace').strip()
                 del buf[:nl_idx + 1]
-                if line and self.text_cb:
-                    try:
-                        self.text_cb(line)
-                    except Exception as e:
-                        logger.error("text_cb error: %s", e)
+                if line:
+                    logger.debug("RX text: %s", line)
+                    if self.text_cb:
+                        try:
+                            self.text_cb(line)
+                        except Exception as e:
+                            logger.error("text_cb error: %s", e)
                 continue
 
             if sync_idx == -1:
+                logger.debug("No sync in buf (%d bytes) — waiting", len(buf))
                 break
 
             # Discard bytes before sync
             if sync_idx > 0:
+                logger.debug("Discarding %d bytes before sync", sync_idx)
                 del buf[:sync_idx]
 
             # Wait for full header
             if len(buf) < FRAME_HEADER_LEN:
+                logger.debug("Incomplete header: have %d/%d bytes",
+                             len(buf), FRAME_HEADER_LEN)
                 break
 
             seq   = (buf[2] << 24) | (buf[3] << 16) | (buf[4] << 8) | buf[5]
             count = (buf[6] << 8) | buf[7]
             frame_len = FRAME_HEADER_LEN + count * 4
 
+            logger.debug("Frame header: seq=%d samples=%d expected_len=%d buf=%d",
+                         seq, count, frame_len, len(buf))
+
             # Wait for full payload
             if len(buf) < frame_len:
+                logger.debug("Incomplete payload: have %d/%d bytes",
+                             len(buf), frame_len)
                 break
 
             # Detect dropped waveforms
@@ -114,19 +133,27 @@ class CommandClient:
                 expected = (self._last_seq + 1) & 0xFFFFFFFF
                 if seq != expected:
                     dropped = (seq - self._last_seq - 1) & 0xFFFFFFFF
-                    logger.warning("Dropped %d waveform(s): seq %d -> %d", dropped, self._last_seq, seq)
+                    logger.warning("Dropped %d waveform(s): seq %d -> %d",
+                                   dropped, self._last_seq, seq)
             self._last_seq = seq
 
-            # Deliver samples
-            if self.sample_cb:
-                for i in range(count):
-                    offset = FRAME_HEADER_LEN + i * 4
-                    ch1 = ((buf[offset]     << 8) | buf[offset + 1]) & ADC_MASK
-                    ch2 = ((buf[offset + 2] << 8) | buf[offset + 3]) & ADC_MASK
-                    try:
-                        self.sample_cb(ch1, ch2)
-                    except Exception as e:
-                        logger.error("sample_cb error: %s", e)
+            # Deliver whole frame as numpy arrays (one call per frame, not per sample)
+            if self.frame_cb:
+                # View payload as big-endian uint16 pairs: [ch1, ch2, ch1, ch2, ...]
+                payload = bytes(buf[FRAME_HEADER_LEN:frame_len])
+                raw = np.frombuffer(payload, dtype='>u2').reshape(count, 2)
+                ch1 = (raw[:, 0] & ADC_MASK).astype(np.uint16)
+                ch2 = (raw[:, 1] & ADC_MASK).astype(np.uint16)
+                logger.info("Frame OK  seq=%d samples=%d "
+                            "ch1=[%d..%d] ch2=[%d..%d]",
+                            seq, count,
+                            int(ch1.min()), int(ch1.max()),
+                            int(ch2.min()), int(ch2.max()))
+                try:
+                    self.frame_cb(seq, ch1, ch2)
+                    logger.debug("frame_cb delivered seq=%d", seq)
+                except Exception as e:
+                    logger.error("frame_cb error: %s", e)
 
             del buf[:frame_len]
 

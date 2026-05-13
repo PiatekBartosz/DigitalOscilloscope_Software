@@ -26,13 +26,23 @@ def main():
     logging.basicConfig(level=logging.DEBUG if options.debug else logging.INFO)
     logger.info("Starting oscilloscope application")
 
-    sample_queue: queue.Queue = queue.Queue(maxsize=4096)
+    # Queue holds complete frames (ch1, ch2 numpy arrays); depth 4 keeps only
+    # recent captures so the display always shows the latest acquisition.
+    frame_queue: queue.Queue = queue.Queue(maxsize=4)
 
-    def on_sample(ch1: int, ch2: int):
+    def on_frame(seq: int, ch1, ch2):
         try:
-            sample_queue.put_nowait((ch1, ch2))
+            frame_queue.put_nowait((ch1, ch2))
         except queue.Full:
-            pass
+            # Drop oldest frame and replace with latest
+            try:
+                frame_queue.get_nowait()
+            except queue.Empty:
+                pass
+            try:
+                frame_queue.put_nowait((ch1, ch2))
+            except queue.Full:
+                pass
 
     async_loop = asyncio.new_event_loop()
 
@@ -45,8 +55,8 @@ def main():
 
     app = QApplication(sys.argv)
 
-    conn_mgr = ConnectionManager(sample_cb=on_sample)
-    osc = Oscilloscope(conn_mgr, sample_queue)
+    conn_mgr = ConnectionManager(frame_cb=on_frame)
+    osc = Oscilloscope(conn_mgr, frame_queue)
     osc.show()
 
     conn_mgr.start(async_loop, ip=options.ip, port=options.port)
