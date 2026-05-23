@@ -29,6 +29,19 @@ _PRESETS = [
     ("Interleaved OFF", "afe interleaved 0"),
     ("ADC Mock ON", "afe mock_adc 1"),
     ("ADC Mock OFF", "afe mock_adc 0"),
+    ("── Raw memory ──", ""),
+    ("Raw: write (capture)", "raw_write"),
+    ("Raw: read (display)", "raw_read"),
+    ("Raw: write+read", "raw_write_read"),
+    ("Raw: reset write ptr", "raw_reset_write_ptr"),
+    ("── Sample size ──", ""),
+    ("Samples: 128", "afe sample_size 128"),
+    ("Samples: 256", "afe sample_size 256"),
+    ("Samples: 512", "afe sample_size 512"),
+    ("Samples: 1024", "afe sample_size 1024"),
+    ("Samples: 2048", "afe sample_size 2048"),
+    ("Samples: 4096", "afe sample_size 4096"),
+    ("Samples: 8192", "afe sample_size 8192"),
 ]
 
 
