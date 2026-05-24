@@ -19,8 +19,6 @@ ADC_COUNTS  = 16384
 ADC_VREF    = 5.0
 
 
-def _raw_to_volts(raw: np.ndarray) -> np.ndarray:
-    return (raw.astype(np.float32) - ADC_COUNTS / 2) / (ADC_COUNTS / 2) * ADC_VREF
 
 
 class Oscilloscope(QMainWindow):
@@ -35,6 +33,8 @@ class Oscilloscope(QMainWindow):
         self._ch2_data = np.zeros(self.DISPLAY_SAMPLES, dtype=np.float32)
 
         self._build_ui()
+
+        self._adc_format    = "Offset Binary"
 
         self.gain           = 1.0
         self.offset         = 0.0
@@ -80,8 +80,8 @@ class Oscilloscope(QMainWindow):
         self.plotWidget.showGrid(x=True, y=True, alpha=0.5)
         self.plotWidget.setLabel("left",  "Voltage", units="V")
         self.plotWidget.setLabel("bottom","Samples")
-        self._curve_ch1   = self.plotWidget.plot(pen='y',  name="CH1")
-        self._curve_ch2   = self.plotWidget.plot(pen='c',  name="CH2")
+        self._curve_ch1   = self.plotWidget.plot(pen='y',  name="CH1", stepMode='left')
+        self._curve_ch2   = self.plotWidget.plot(pen='c',  name="CH2", stepMode='left')
         self._trigger_line = pg.InfiniteLine(
             angle=0, pen=pg.mkPen('r', width=1.5))
         self.plotWidget.addItem(self._trigger_line)
@@ -111,6 +111,12 @@ class Oscilloscope(QMainWindow):
         self._trig_mode_combo.currentTextChanged.connect(
             self._on_trigger_mode_change)
         ctrl_layout.addWidget(self._trig_mode_combo)
+
+        ctrl_layout.addWidget(QLabel("ADC Format"))
+        self._format_combo = QComboBox()
+        self._format_combo.addItems(["Offset Binary", "2's Complement"])
+        self._format_combo.currentTextChanged.connect(self._on_format_change)
+        ctrl_layout.addWidget(self._format_combo)
 
         ctrl_layout.addWidget(QLabel("CH1 Coupling"))
         self._dc_radio = QRadioButton("DC")
@@ -286,6 +292,9 @@ class Oscilloscope(QMainWindow):
     def _on_trigger_mode_change(self, mode: str):
         self.trigger_mode = mode
 
+    def _on_format_change(self, fmt: str):
+        self._adc_format = fmt
+
     def _on_coupling_change(self, button):
         coupling = "ac" if button.text() == "AC" else "dc"
         self.ac_coupling = (coupling == "ac")
@@ -345,6 +354,16 @@ class Oscilloscope(QMainWindow):
         self._single_btn.setEnabled(True)
         self._status_label.setText("Connected")
 
+    def _raw_to_volts(self, raw: np.ndarray) -> np.ndarray:
+        half = ADC_COUNTS // 2
+        if self._adc_format == "Offset Binary":
+            return (raw.astype(np.float32) - half) / half * ADC_VREF
+        else:  # 2's Complement
+            signed = np.where(raw >= half,
+                              raw.astype(np.int32) - ADC_COUNTS,
+                              raw.astype(np.int32))
+            return signed.astype(np.float32) / half * ADC_VREF
+
     def _update_plot(self):
         # Drain queue and keep only the latest frame (newest-wins for live display)
         latest = None
@@ -356,8 +375,8 @@ class Oscilloscope(QMainWindow):
 
         if latest is not None:
             ch1_raw, ch2_raw = latest
-            self._ch1_data = _raw_to_volts(ch1_raw)
-            self._ch2_data = _raw_to_volts(ch2_raw)
+            self._ch1_data = self._raw_to_volts(ch1_raw)
+            self._ch2_data = self._raw_to_volts(ch2_raw)
 
         ch1 = self._ch1_data * self.gain + self.offset + self.vpos
         ch2 = self._ch2_data * self.gain + self.offset + self.vpos
