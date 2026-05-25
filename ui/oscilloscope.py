@@ -18,6 +18,18 @@ logger = logging.getLogger(__name__)
 ADC_COUNTS  = 16384
 ADC_VREF    = 5.0
 
+# Achievable timebases from 80 MHz ADC with 8192 samples across 10 divisions.
+# (time/div = decimation_factor / 80e6 × 819.2)
+TIMEBASES = [
+    ("10.24 µs/div",   1),
+    ("20.48 µs/div",   2),
+    ("51.2 µs/div",    5),
+    ("102.4 µs/div",  10),
+    ("204.8 µs/div",  20),
+    ("512 µs/div",    50),
+    ("1.024 ms/div", 100),
+]
+
 
 
 
@@ -39,7 +51,7 @@ class Oscilloscope(QMainWindow):
         self.gain           = 1.0
         self.offset         = 0.0
         self.trigger_level  = 0.0
-        self.timebase       = 10
+        self.timebase       = TIMEBASES[0][1]  # decimation factor
         self.vpos           = 0.0
         self.trigger_mode   = "Auto"
         self.ac_coupling    = False   # CH1
@@ -77,9 +89,27 @@ class Oscilloscope(QMainWindow):
         main_layout = QHBoxLayout(top_widget)
 
         self.plotWidget = pg.PlotWidget()
-        self.plotWidget.showGrid(x=True, y=True, alpha=0.5)
+        self.plotWidget.showGrid(x=True, y=True, alpha=0.4)
         self.plotWidget.setLabel("left",  "Voltage", units="V")
         self.plotWidget.setLabel("bottom","Samples")
+
+        # Immutable 8×10 grid — all interaction disabled
+        vb = self.plotWidget.getViewBox()
+        vb.setMouseEnabled(x=False, y=False)
+        vb.disableAutoRange()
+        self.plotWidget.setMenuEnabled(False)
+        self.plotWidget.hideButtons()
+        self.plotWidget.setXRange(0, self.DISPLAY_SAMPLES, padding=0)
+        self.plotWidget.setYRange(-4, 4, padding=0)
+        vb.setLimits(xMin=0, xMax=self.DISPLAY_SAMPLES, yMin=-4, yMax=4)
+
+        # Major ticks at each of the 10 horizontal and 8 vertical divisions
+        x_step = self.DISPLAY_SAMPLES / 10
+        x_ticks = [(x_step * i, str(int(x_step * i))) for i in range(11)]
+        y_ticks = [(-4 + i, f"{-4 + i} V") for i in range(9)]
+        self.plotWidget.getAxis('bottom').setTicks([x_ticks])
+        self.plotWidget.getAxis('left').setTicks([y_ticks])
+
         self._curve_ch1   = self.plotWidget.plot(pen='y',  name="CH1", stepMode='left')
         self._curve_ch2   = self.plotWidget.plot(pen='c',  name="CH2", stepMode='left')
         self._trigger_line = pg.InfiniteLine(
@@ -100,8 +130,12 @@ class Oscilloscope(QMainWindow):
         self._trigger_dial, _ = create_dial_widget(
             "Trigger Level (mV)", -2000, 2000, 0, ctrl_layout,
             self._on_trigger_change)
-        self._timebase_dial, _ = create_dial_widget(
-            "Timebase", 1, 50, 10, ctrl_layout, self._on_timebase_change)
+        ctrl_layout.addWidget(QLabel("Timebase (H. Scale)"))
+        self._timebase_combo = QComboBox()
+        for label, _ in TIMEBASES:
+            self._timebase_combo.addItem(label)
+        self._timebase_combo.currentIndexChanged.connect(self._on_timebase_change)
+        ctrl_layout.addWidget(self._timebase_combo)
         self._vpos_dial, _ = create_dial_widget(
             "Vert Pos (mV)", -500, 500, 0, ctrl_layout, self._on_vpos_change)
 
@@ -283,8 +317,10 @@ class Oscilloscope(QMainWindow):
         self.trigger_level = self._trigger_dial.value() / 1000.0
         self._trigger_line.setValue(self.trigger_level)
 
-    def _on_timebase_change(self):
-        self.timebase = self._timebase_dial.value()
+    def _on_timebase_change(self, index: int):
+        _, factor = TIMEBASES[index]
+        self.timebase = factor
+        self._send_control(f"afe decim {factor}")
 
     def _on_vpos_change(self):
         self.vpos = self._vpos_dial.value() / 1000.0
