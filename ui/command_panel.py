@@ -2,13 +2,11 @@ from datetime import datetime
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
-    QComboBox, QLineEdit, QPushButton, QTextEdit, QLabel,
+    QComboBox, QLineEdit, QPushButton, QTextEdit, QLabel, QSizePolicy,
 )
 from PyQt6.QtCore import pyqtSignal as Signal, Qt
 from PyQt6.QtGui import QTextCursor, QColor
 
-# (display label, command template)
-# Templates ending with a space expect the user to append a value.
 _PRESETS = [
     ("── Presets ──", ""),
     ("CH1 gain …", "afe gain 1 "),
@@ -23,6 +21,10 @@ _PRESETS = [
     ("CH1 coupling DC", "afe coupling 1 dc"),
     ("CH2 coupling AC", "afe coupling 2 ac"),
     ("CH2 coupling DC", "afe coupling 2 dc"),
+    ("CH1 ADC range 1 Vpp", "afe range 1 1"),
+    ("CH1 ADC range 2 Vpp", "afe range 1 2"),
+    ("CH2 ADC range 1 Vpp", "afe range 2 1"),
+    ("CH2 ADC range 2 Vpp", "afe range 2 2"),
     ("Trigger AC", "afe trigger ac"),
     ("Trigger DC", "afe trigger dc"),
     ("Interleaved ON", "afe interleaved 1"),
@@ -48,6 +50,9 @@ _PRESETS = [
 class CommandPanel(QWidget):
     """Bottom command console: preset picker + free-text input + history log."""
 
+    _LOG_MIN_LINES = 2
+    _LOG_MAX_LINES = 6
+
     command_submitted = Signal(str)
 
     def __init__(self, parent=None):
@@ -57,16 +62,15 @@ class CommandPanel(QWidget):
         self._build_ui()
 
     def _build_ui(self):
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(4, 4, 4, 4)
         outer.setSpacing(4)
 
-        # ── header label ──────────────────────────────────────────────────────
         header = QLabel("Command Console")
         header.setStyleSheet("font-weight: bold; color: #00ffff;")
         outer.addWidget(header)
 
-        # ── input row ─────────────────────────────────────────────────────────
         row = QHBoxLayout()
         row.setSpacing(6)
 
@@ -95,22 +99,18 @@ class CommandPanel(QWidget):
 
         outer.addLayout(row)
 
-        # ── log area ──────────────────────────────────────────────────────────
         self._log = QTextEdit()
         self._log.setReadOnly(True)
-        self._log.setFixedHeight(130)
         self._log.setStyleSheet(
             "QTextEdit { background-color: #111; color: #ccc;"
             " border: 1px solid #444; font-family: Consolas, monospace;"
             " font-size: 10pt; }"
         )
         outer.addWidget(self._log)
+        self._update_log_height()
 
-        # wire clear button now that _log exists
         clear_btn.clicked.disconnect()
-        clear_btn.clicked.connect(self._log.clear)
-
-    # ── preset selection ──────────────────────────────────────────────────────
+        clear_btn.clicked.connect(self._clear_log)
 
     def _on_preset_selected(self, idx: int):
         template = _PRESETS[idx][1]
@@ -119,12 +119,9 @@ class CommandPanel(QWidget):
         self._input.setText(template)
         self._input.setFocus()
         self._input.setCursorPosition(len(template))
-        # reset combo so the same item can be selected again
         self._preset_combo.blockSignals(True)
         self._preset_combo.setCurrentIndex(0)
         self._preset_combo.blockSignals(False)
-
-    # ── send ──────────────────────────────────────────────────────────────────
 
     def _send(self):
         cmd = self._input.text().strip()
@@ -135,8 +132,6 @@ class CommandPanel(QWidget):
         self._input.clear()
         self._append_log(f"> {cmd}", "#00ffff")
         self.command_submitted.emit(cmd)
-
-    # ── keyboard history navigation (↑ / ↓) ──────────────────────────────────
 
     def eventFilter(self, obj, event):
         from PyQt6.QtCore import QEvent
@@ -156,8 +151,6 @@ class CommandPanel(QWidget):
                 return True
         return super().eventFilter(obj, event)
 
-    # ── public API ────────────────────────────────────────────────────────────
-
     def log_cmd(self, cmd: str):
         """Echo an outgoing command (cyan, same style as manually typed ones)."""
         self._append_log(f"> {cmd}", "#00ffff")
@@ -171,8 +164,6 @@ class CommandPanel(QWidget):
     def log_error(self, msg: str):
         self._append_log(msg, "#ff4444")
 
-    # ── internal ─────────────────────────────────────────────────────────────
-
     def _append_log(self, text: str, color: str = "#cccccc"):
         ts = datetime.now().strftime("%H:%M:%S")
         self._log.moveCursor(QTextCursor.MoveOperation.End)
@@ -181,3 +172,16 @@ class CommandPanel(QWidget):
         self._log.setTextColor(QColor(color))
         self._log.insertPlainText(text + "\n")
         self._log.moveCursor(QTextCursor.MoveOperation.End)
+        self._update_log_height()
+
+    def _clear_log(self):
+        self._log.clear()
+        self._update_log_height()
+
+    def _update_log_height(self):
+        visible_lines = min(max(self._log.document().blockCount(), self._LOG_MIN_LINES),
+                            self._LOG_MAX_LINES)
+        height = visible_lines * self._log.fontMetrics().lineSpacing() + 12
+        self._log.setFixedHeight(height)
+        self.setMaximumHeight(self.sizeHint().height())
+        self.updateGeometry()

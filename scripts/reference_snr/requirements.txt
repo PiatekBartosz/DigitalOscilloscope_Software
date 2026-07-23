@@ -1,0 +1,4 @@
+# Optional dependencies needed only for the bundled reference scripts.
+pandas
+scipy
+matplotlib

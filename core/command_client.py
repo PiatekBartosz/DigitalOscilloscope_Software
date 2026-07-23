@@ -5,11 +5,7 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# Binary frame format (big-endian):
-#   [0xAD][0xC1]           2 bytes  sync
-#   [seq3..seq0]           4 bytes  uint32 waveform sequence number
-#   [cnt1][cnt0]           2 bytes  uint16 sample count N
-#   [N × (ch1_hi ch1_lo ch2_hi ch2_lo)]  N*4 bytes  samples
+# Frame: sync(2), sequence(4), count(2), samples(N*4), big-endian.
 FRAME_SYNC       = bytes([0xAD, 0xC1])
 FRAME_HEADER_LEN = 8
 ADC_MASK         = 0x3FFF
@@ -66,7 +62,6 @@ class CommandClient:
         buf = bytearray()
         try:
             while True:
-                # 64 KB chunks — fits a full 32 KB waveform frame in one or two reads
                 chunk = await reader.read(65536)
                 if not chunk:
                     logger.info("Connection closed by remote")
@@ -87,7 +82,6 @@ class CommandClient:
             sync_idx = buf.find(FRAME_SYNC)
             nl_idx   = buf.find(b'\n')
 
-            # Text reply before the next binary frame (or no frame yet)
             if nl_idx != -1 and (sync_idx == -1 or nl_idx < sync_idx):
                 line = buf[:nl_idx].decode(errors='replace').strip()
                 del buf[:nl_idx + 1]
@@ -104,12 +98,10 @@ class CommandClient:
                 logger.debug("No sync in buf (%d bytes) — waiting", len(buf))
                 break
 
-            # Discard bytes before sync
             if sync_idx > 0:
                 logger.debug("Discarding %d bytes before sync", sync_idx)
                 del buf[:sync_idx]
 
-            # Wait for full header
             if len(buf) < FRAME_HEADER_LEN:
                 logger.debug("Incomplete header: have %d/%d bytes",
                              len(buf), FRAME_HEADER_LEN)
@@ -122,13 +114,11 @@ class CommandClient:
             logger.debug("Frame header: seq=%d samples=%d expected_len=%d buf=%d",
                          seq, count, frame_len, len(buf))
 
-            # Wait for full payload
             if len(buf) < frame_len:
                 logger.debug("Incomplete payload: have %d/%d bytes",
                              len(buf), frame_len)
                 break
 
-            # Detect dropped waveforms
             if self._last_seq is not None:
                 expected = (self._last_seq + 1) & 0xFFFFFFFF
                 if seq != expected:
@@ -137,9 +127,7 @@ class CommandClient:
                                    dropped, self._last_seq, seq)
             self._last_seq = seq
 
-            # Deliver whole frame as numpy arrays (one call per frame, not per sample)
             if self.frame_cb:
-                # View payload as big-endian uint16 pairs: [ch1, ch2, ch1, ch2, ...]
                 payload = bytes(buf[FRAME_HEADER_LEN:frame_len])
                 raw = np.frombuffer(payload, dtype='>u2').reshape(count, 2)
                 ch1 = (raw[:, 0] & ADC_MASK).astype(np.uint16)
