@@ -6,25 +6,25 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 # Frame: sync(2), sequence(4), count(2), samples(N*4), big-endian.
-FRAME_SYNC       = bytes([0xAD, 0xC1])
+FRAME_SYNC = bytes([0xAD, 0xC1])
 FRAME_HEADER_LEN = 8
-ADC_MASK         = 0x3FFF
+ADC_MASK = 0x3FFF
 
 
 class CommandClient:
     def __init__(self, host: str, port: int, frame_cb=None, text_cb=None):
-        self.host      = host
-        self.port      = port
-        self.frame_cb  = frame_cb
-        self.text_cb   = text_cb
-        self.writer    = None
+        self.host = host
+        self.port = port
+        self.frame_cb = frame_cb
+        self.text_cb = text_cb
+        self.writer = None
         self.connected = False
         self._recv_task = None
-        self._last_seq  = None
+        self._last_seq = None
 
     async def connect(self):
         reader, writer = await asyncio.open_connection(self.host, self.port)
-        self.writer    = writer
+        self.writer = writer
         self.connected = True
         self._last_seq = None
         logger.info("Connected to %s:%d", self.host, self.port)
@@ -51,7 +51,7 @@ class CommandClient:
             logger.warning("Cannot send '%s': not connected", cmd)
             return
         try:
-            self.writer.write(cmd.encode() + b'\n')
+            self.writer.write(cmd.encode() + b"\n")
             await self.writer.drain()
             logger.info("Sent: %s", cmd)
         except Exception as e:
@@ -66,8 +66,11 @@ class CommandClient:
                 if not chunk:
                     logger.info("Connection closed by remote")
                     break
-                logger.debug("TCP chunk: %d bytes (buf now %d bytes)",
-                             len(chunk), len(buf) + len(chunk))
+                logger.debug(
+                    "TCP chunk: %d bytes (buf now %d bytes)",
+                    len(chunk),
+                    len(buf) + len(chunk),
+                )
                 buf.extend(chunk)
                 buf = self._parse_frames(buf)
         except asyncio.CancelledError:
@@ -80,11 +83,11 @@ class CommandClient:
     def _parse_frames(self, buf: bytearray) -> bytearray:
         while True:
             sync_idx = buf.find(FRAME_SYNC)
-            nl_idx   = buf.find(b'\n')
+            nl_idx = buf.find(b"\n")
 
             if nl_idx != -1 and (sync_idx == -1 or nl_idx < sync_idx):
-                line = buf[:nl_idx].decode(errors='replace').strip()
-                del buf[:nl_idx + 1]
+                line = buf[:nl_idx].decode(errors="replace").strip()
+                del buf[: nl_idx + 1]
                 if line:
                     logger.debug("RX text: %s", line)
                     if self.text_cb:
@@ -103,40 +106,55 @@ class CommandClient:
                 del buf[:sync_idx]
 
             if len(buf) < FRAME_HEADER_LEN:
-                logger.debug("Incomplete header: have %d/%d bytes",
-                             len(buf), FRAME_HEADER_LEN)
+                logger.debug(
+                    "Incomplete header: have %d/%d bytes", len(buf), FRAME_HEADER_LEN
+                )
                 break
 
-            seq   = (buf[2] << 24) | (buf[3] << 16) | (buf[4] << 8) | buf[5]
+            seq = (buf[2] << 24) | (buf[3] << 16) | (buf[4] << 8) | buf[5]
             count = (buf[6] << 8) | buf[7]
             frame_len = FRAME_HEADER_LEN + count * 4
 
-            logger.debug("Frame header: seq=%d samples=%d expected_len=%d buf=%d",
-                         seq, count, frame_len, len(buf))
+            logger.debug(
+                "Frame header: seq=%d samples=%d expected_len=%d buf=%d",
+                seq,
+                count,
+                frame_len,
+                len(buf),
+            )
 
             if len(buf) < frame_len:
-                logger.debug("Incomplete payload: have %d/%d bytes",
-                             len(buf), frame_len)
+                logger.debug(
+                    "Incomplete payload: have %d/%d bytes", len(buf), frame_len
+                )
                 break
 
             if self._last_seq is not None:
                 expected = (self._last_seq + 1) & 0xFFFFFFFF
                 if seq != expected:
                     dropped = (seq - self._last_seq - 1) & 0xFFFFFFFF
-                    logger.warning("Dropped %d waveform(s): seq %d -> %d",
-                                   dropped, self._last_seq, seq)
+                    logger.warning(
+                        "Dropped %d waveform(s): seq %d -> %d",
+                        dropped,
+                        self._last_seq,
+                        seq,
+                    )
             self._last_seq = seq
 
             if self.frame_cb:
                 payload = bytes(buf[FRAME_HEADER_LEN:frame_len])
-                raw = np.frombuffer(payload, dtype='>u2').reshape(count, 2)
+                raw = np.frombuffer(payload, dtype=">u2").reshape(count, 2)
                 ch1 = (raw[:, 0] & ADC_MASK).astype(np.uint16)
                 ch2 = (raw[:, 1] & ADC_MASK).astype(np.uint16)
-                logger.info("Frame OK  seq=%d samples=%d "
-                            "ch1=[%d..%d] ch2=[%d..%d]",
-                            seq, count,
-                            int(ch1.min()), int(ch1.max()),
-                            int(ch2.min()), int(ch2.max()))
+                logger.info(
+                    "Frame OK  seq=%d samples=%d ch1=[%d..%d] ch2=[%d..%d]",
+                    seq,
+                    count,
+                    int(ch1.min()),
+                    int(ch1.max()),
+                    int(ch2.min()),
+                    int(ch2.max()),
+                )
                 try:
                     self.frame_cb(seq, ch1, ch2)
                     logger.debug("frame_cb delivered seq=%d", seq)

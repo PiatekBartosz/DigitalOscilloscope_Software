@@ -52,7 +52,6 @@ def compute_metrics(
     centered = samples - np.mean(samples)
     windowed = centered * win
 
-
     rect_power = np.abs(np.fft.rfft(centered)) ** 2
     rect_peak_bin = int(np.argmax(rect_power[1:])) + 1
     neighbor_power = 0.0
@@ -62,7 +61,9 @@ def compute_metrics(
     if neighbor_power <= np.finfo(float).tiny:
         coherence_margin_db = float("inf")
     else:
-        coherence_margin_db = 10.0 * np.log10(rect_power[rect_peak_bin] / neighbor_power)
+        coherence_margin_db = 10.0 * np.log10(
+            rect_power[rect_peak_bin] / neighbor_power
+        )
     is_coherent = bool(coherence_margin_db > 40.0)
 
     spectrum = np.fft.rfft(windowed)
@@ -108,7 +109,9 @@ def compute_metrics(
     noise_bin_count = max(int(np.sum(noise_mask)), 1)
 
     snr_db = 10.0 * np.log10(signal_power / noise_power)
-    thd_db = 10.0 * np.log10(max(harmonic_power_total, np.finfo(float).tiny) / signal_power)
+    thd_db = 10.0 * np.log10(
+        max(harmonic_power_total, np.finfo(float).tiny) / signal_power
+    )
     thd_percent = 100.0 * np.sqrt(harmonic_power_total / signal_power)
     sinad_db = 10.0 * np.log10(signal_power / (noise_power + harmonic_power_total))
     enob = (sinad_db - 1.76) / 6.02
@@ -151,7 +154,9 @@ def compute_metrics(
     )
 
 
-def suggest_coherent_frequency(desired_hz: float, fs_hz: float, n: int) -> tuple[float, int]:
+def suggest_coherent_frequency(
+    desired_hz: float, fs_hz: float, n: int
+) -> tuple[float, int]:
     k = max(1, round(desired_hz * n / fs_hz))
     return k * fs_hz / n, k
 
@@ -172,7 +177,5 @@ def format_report(metrics: SpectralMetrics, channel_label: str = "CH1") -> str:
         f"(peak/neighbor-bin margin {metrics.coherence_margin_db:.1f} dB)",
     ]
     if not metrics.is_coherent:
-        lines.append(
-            "WARNING: capture does not look coherent"
-        )
+        lines.append("WARNING: capture does not look coherent")
     return "\n".join(lines)

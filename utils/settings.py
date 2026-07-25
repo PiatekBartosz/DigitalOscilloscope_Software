@@ -26,6 +26,7 @@ def save_settings(settings: dict) -> None:
     """Persist settings atomically enough for a desktop configuration file."""
     try:
         _SETTINGS_PATH.write_text(
-            json.dumps(settings, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            json.dumps(settings, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
     except OSError:
         pass

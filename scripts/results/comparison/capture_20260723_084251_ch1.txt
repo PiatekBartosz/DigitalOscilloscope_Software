@@ -1,0 +1,4 @@
+SNR comparison
+  Native implementation: 23.030000 dB
+  QA403 reference:      23.345309 dB
+  Reference − native:   +0.315309 dB

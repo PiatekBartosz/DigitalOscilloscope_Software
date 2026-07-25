@@ -13,5 +13,6 @@ Generated files are organized by implementation:
 - `results/implementation/` contains plots, reports, and live captures from `snr_analysis.py`.
 - `results/reference/` contains spectrum plots from `run_reference_snr.py`.
 - `results/captures/` retains the raw CSV used by each comparison run.
+- `results/comparison/` contains the saved side-by-side SNR summaries.
 
 The unmodified third-party reference material used by the adapter is in `reference_snr/`.

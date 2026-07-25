@@ -3,3 +3,4 @@ pyqtgraph>=0.13.0
 numpy>=1.19.0
 zeroconf>=0.115.0
 matplotlib>=3.5.0
+ruff>=0.8.0

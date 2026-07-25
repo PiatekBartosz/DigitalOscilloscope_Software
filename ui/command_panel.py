@@ -1,8 +1,15 @@
 from datetime import datetime
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout,
-    QComboBox, QLineEdit, QPushButton, QTextEdit, QLabel, QSizePolicy,
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QComboBox,
+    QLineEdit,
+    QPushButton,
+    QTextEdit,
+    QLabel,
+    QSizePolicy,
 )
 from PyQt6.QtCore import pyqtSignal as Signal, Qt
 from PyQt6.QtGui import QTextCursor, QColor
@@ -94,7 +101,9 @@ class CommandPanel(QWidget):
 
         clear_btn = QPushButton("Clear")
         clear_btn.setFixedWidth(60)
-        clear_btn.clicked.connect(self._log.clear if hasattr(self, "_log") else lambda: None)
+        clear_btn.clicked.connect(
+            self._log.clear if hasattr(self, "_log") else lambda: None
+        )
         row.addWidget(clear_btn)
 
         outer.addLayout(row)
@@ -136,6 +145,7 @@ class CommandPanel(QWidget):
     def eventFilter(self, obj, event):
         from PyQt6.QtCore import QEvent
         from PyQt6.QtGui import QKeyEvent
+
         if obj is self._input and event.type() == QEvent.Type.KeyPress:
             key = event.key()
             if key == Qt.Key.Key_Up and self._history:
@@ -146,7 +156,8 @@ class CommandPanel(QWidget):
                 self._hist_idx = min(len(self._history), self._hist_idx + 1)
                 self._input.setText(
                     self._history[self._hist_idx]
-                    if self._hist_idx < len(self._history) else ""
+                    if self._hist_idx < len(self._history)
+                    else ""
                 )
                 return True
         return super().eventFilter(obj, event)
@@ -179,8 +190,10 @@ class CommandPanel(QWidget):
         self._update_log_height()
 
     def _update_log_height(self):
-        visible_lines = min(max(self._log.document().blockCount(), self._LOG_MIN_LINES),
-                            self._LOG_MAX_LINES)
+        visible_lines = min(
+            max(self._log.document().blockCount(), self._LOG_MIN_LINES),
+            self._LOG_MAX_LINES,
+        )
         height = visible_lines * self._log.fontMetrics().lineSpacing() + 12
         self._log.setFixedHeight(height)
         self.setMaximumHeight(self.sizeHint().height())

@@ -51,10 +51,11 @@ def create_dial_widget(label_text, min_val, max_val, init_val, parent_layout, ca
     return dial, edit
 
 
-def create_float_dial_widget(label_text, min_val, max_val, init_val, parent_layout,
-                             callback, decimals=2):
+def create_float_dial_widget(
+    label_text, min_val, max_val, init_val, parent_layout, callback, decimals=2
+):
     """Create a coarse dial paired with a precise floating-point value field."""
-    scale = 10 ** decimals
+    scale = 10**decimals
     layout = QHBoxLayout()
     layout.setSpacing(6)
     layout.setContentsMargins(0, 0, 0, 0)

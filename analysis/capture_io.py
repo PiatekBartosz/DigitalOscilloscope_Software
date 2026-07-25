@@ -6,6 +6,7 @@ the display-voltage conversion used for the waveform view.  Metadata is kept
 as ``# key=value`` lines so the file remains easy to inspect in Octave, Excel,
 or a text editor.
 """
+
 from __future__ import annotations
 
 import csv
@@ -78,7 +79,9 @@ def save_capture_csv(
             writer.writerow(row)
 
 
-def load_capture_csv(path: str | pathlib.Path) -> tuple[np.ndarray, np.ndarray, CaptureMeta]:
+def load_capture_csv(
+    path: str | pathlib.Path,
+) -> tuple[np.ndarray, np.ndarray, CaptureMeta]:
     """Load a capture saved by save_capture_csv(). Returns (ch1, ch2, meta)."""
     path = pathlib.Path(path)
     meta_kv: dict[str, str] = {}
@@ -94,7 +97,9 @@ def load_capture_csv(path: str | pathlib.Path) -> tuple[np.ndarray, np.ndarray, 
                 data_lines.append(line)
 
     if "fs_hz" not in meta_kv:
-        raise ValueError(f"{path}: missing '# fs_hz=' metadata line — not a valid capture file")
+        raise ValueError(
+            f"{path}: missing '# fs_hz=' metadata line — not a valid capture file"
+        )
 
     reader = csv.DictReader(data_lines)
     ch1_list: list[int] = []
@@ -111,4 +116,8 @@ def load_capture_csv(path: str | pathlib.Path) -> tuple[np.ndarray, np.ndarray, 
         timestamp=meta_kv.get("timestamp", ""),
         fields=meta_kv,
     )
-    return np.array(ch1_list, dtype=np.uint16), np.array(ch2_list, dtype=np.uint16), meta
+    return (
+        np.array(ch1_list, dtype=np.uint16),
+        np.array(ch2_list, dtype=np.uint16),
+        meta,
+    )

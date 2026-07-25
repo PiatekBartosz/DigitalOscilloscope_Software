@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Run the bundled Hans Rosenberg SNR reference against an oscilloscope CSV."""
+
 from __future__ import annotations
 
 import argparse
@@ -29,8 +30,12 @@ def parse_args() -> argparse.Namespace:
             "format and run the bundled SNR reference implementation."
         )
     )
-    parser.add_argument("capture_csv", type=Path, nargs="?", help="capture CSV saved by the GUI")
-    parser.add_argument("--channel", choices=("1", "2"), default="1", help="channel to analyse")
+    parser.add_argument(
+        "capture_csv", type=Path, nargs="?", help="capture CSV saved by the GUI"
+    )
+    parser.add_argument(
+        "--channel", choices=("1", "2"), default="1", help="channel to analyse"
+    )
     parser.add_argument("--band-min", type=float, default=100.0, metavar="HZ")
     parser.add_argument("--band-max", type=float, default=10100.0, metavar="HZ")
     parser.add_argument(
@@ -82,7 +87,9 @@ def configure_interactively(args: argparse.Namespace) -> None:
     args.band_min = float(_prompt("Band minimum (Hz)", f"{args.band_min:g}"))
     max_bin_hz = fs_hz / 2 - fs_hz / capture_depth
     args.band_max = float(_prompt("Band maximum (Hz)", f"{max_bin_hz:g}"))
-    default_plot = REFERENCE_RESULTS_DIR / f"{args.capture_csv.stem}_ch{args.channel}.png"
+    default_plot = (
+        REFERENCE_RESULTS_DIR / f"{args.capture_csv.stem}_ch{args.channel}.png"
+    )
     args.save_plot = Path(_prompt("Output plot", str(default_plot)))
 
 
@@ -103,7 +110,9 @@ def require_reference_dependencies() -> bool:
     return False
 
 
-def write_qa403_csv(path: Path, ch1, ch2, fs_hz: float, n_bits: int, channel: int) -> None:
+def write_qa403_csv(
+    path: Path, ch1, ch2, fs_hz: float, n_bits: int, channel: int
+) -> None:
     selected, other = (ch1, ch2) if channel == 1 else (ch2, ch1)
     midpoint = 1 << (n_bits - 1)
     with path.open("w", newline="") as output:
@@ -120,7 +129,9 @@ def write_qa403_csv(path: Path, ch1, ch2, fs_hz: float, n_bits: int, channel: in
             )
 
 
-def configure_temporary_reference(source: str, fs_hz: float, band_min: float, band_max: float) -> str:
+def configure_temporary_reference(
+    source: str, fs_hz: float, band_min: float, band_max: float
+) -> str:
     replacements = {
         "snrfmin": repr(band_min),
         "snrfmax": repr(band_max),
@@ -147,11 +158,13 @@ def configure_temporary_reference(source: str, fs_hz: float, band_min: float, ba
         flags=re.MULTILINE,
     )
     if substitutions != 1:
-        raise RuntimeError("could not disable the reference script's fixed 48 kHz sample rate")
+        raise RuntimeError(
+            "could not disable the reference script's fixed 48 kHz sample rate"
+        )
     source = source.replace("import numpy as np", "import os\nimport numpy as np", 1)
     source = source.replace(
         "    plt.show()",
-        "    plot_path = os.environ.get(\"DSO_REFERENCE_PLOT_PATH\")\n"
+        '    plot_path = os.environ.get("DSO_REFERENCE_PLOT_PATH")\n'
         "    if plot_path:\n"
         "        plt.savefig(plot_path, dpi=150)\n"
         "        plt.close(fig)\n"
@@ -174,7 +187,10 @@ def run() -> int:
         print(f"Capture CSV not found: {args.capture_csv}", file=sys.stderr)
         return 2
     if args.band_min < 0 or args.band_max <= args.band_min:
-        print("--band-max must be greater than --band-min, and --band-min cannot be negative.", file=sys.stderr)
+        print(
+            "--band-max must be greater than --band-min, and --band-min cannot be negative.",
+            file=sys.stderr,
+        )
         return 2
     if not require_reference_dependencies():
         return 2
@@ -184,10 +200,17 @@ def run() -> int:
 
     ch1, ch2, metadata = load_capture_csv(args.capture_csv)
     if args.band_max >= metadata.fs_hz / 2:
-        print("The selected SNR band must be below the capture Nyquist frequency.", file=sys.stderr)
+        print(
+            "The selected SNR band must be below the capture Nyquist frequency.",
+            file=sys.stderr,
+        )
         return 2
     fft_bin_hz = metadata.fs_hz / len(ch1)
-    band_bin_count = math.floor(args.band_max / fft_bin_hz) - math.ceil(args.band_min / fft_bin_hz) + 1
+    band_bin_count = (
+        math.floor(args.band_max / fft_bin_hz)
+        - math.ceil(args.band_min / fft_bin_hz)
+        + 1
+    )
     if band_bin_count < 16:
         print(
             f"The selected SNR band contains only {band_bin_count} FFT bins "
@@ -211,20 +234,27 @@ def run() -> int:
         temporary_script = workdir / REFERENCE_SCRIPT.name
         temporary_script.write_text(
             configure_temporary_reference(
-                REFERENCE_SCRIPT.read_text(), metadata.fs_hz, args.band_min, args.band_max
+                REFERENCE_SCRIPT.read_text(),
+                metadata.fs_hz,
+                args.band_min,
+                args.band_max,
             )
         )
         print(
             f"Reference input: {len(ch1)} samples, {metadata.fs_hz:g} Hz, "
             f"CH{args.channel}, {args.band_min:g}–{args.band_max:g} Hz."
         )
-        print("The reference reports RMS in centred ADC-code units; its SNR result is scale-independent.")
+        print(
+            "The reference reports RMS in centred ADC-code units; its SNR result is scale-independent."
+        )
         environment = os.environ | {"MPLBACKEND": "Agg"}
         if args.save_plot:
             plot_path = args.save_plot.resolve()
             plot_path.parent.mkdir(parents=True, exist_ok=True)
             environment["DSO_REFERENCE_PLOT_PATH"] = str(plot_path)
-        result = subprocess.run([sys.executable, temporary_script.name], cwd=workdir, env=environment)
+        result = subprocess.run(
+            [sys.executable, temporary_script.name], cwd=workdir, env=environment
+        )
         if result.returncode == 0 and args.save_plot:
             print(f"Saved reference plot -> {args.save_plot}")
         return result.returncode

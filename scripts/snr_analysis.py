@@ -102,14 +102,19 @@ async def _live_acquire(
     return frame["ch1"], frame["ch2"]
 
 
-def _save_plot(path: pathlib.Path, samples: np.ndarray, fs_hz: float, result, channel_label: str):
+def _save_plot(
+    path: pathlib.Path, samples: np.ndarray, fs_hz: float, result, channel_label: str
+):
     try:
         import matplotlib
+
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
     except ImportError:
-        print("matplotlib not installed — skipping --save-plot "
-              "(pip install matplotlib)", file=sys.stderr)
+        print(
+            "matplotlib not installed — skipping --save-plot (pip install matplotlib)",
+            file=sys.stderr,
+        )
         return
 
     fig, (ax_time, ax_spec) = plt.subplots(2, 1, figsize=(9, 6))
@@ -123,16 +128,25 @@ def _save_plot(path: pathlib.Path, samples: np.ndarray, fs_hz: float, result, ch
     plot_floor_dbfs = -180.0
     spectrum_plot_dbfs = np.maximum(result.spectrum_dbfs, plot_floor_dbfs)
     ax_spec.plot(result.freqs_hz / 1e3, spectrum_plot_dbfs, linewidth=0.8)
-    ax_spec.axvline(result.fundamental_freq_hz / 1e3, color="r", linestyle="--",
-                     linewidth=0.8, label="fundamental")
-    display_max_hz = min(result.freqs_hz[-1], max(10.0 * result.fundamental_freq_hz, 1.0))
+    ax_spec.axvline(
+        result.fundamental_freq_hz / 1e3,
+        color="r",
+        linestyle="--",
+        linewidth=0.8,
+        label="fundamental",
+    )
+    display_max_hz = min(
+        result.freqs_hz[-1], max(10.0 * result.fundamental_freq_hz, 1.0)
+    )
     ax_spec.set_xlim(0.0, display_max_hz / 1e3)
     peak_dbfs = float(np.max(spectrum_plot_dbfs))
     ax_spec.set_ylim(plot_floor_dbfs, max(0.0, peak_dbfs + 6.0))
     ax_spec.set_xlabel("Frequency (kHz)")
     ax_spec.set_ylabel("dBFS")
-    ax_spec.set_title(f"Spectrum — SNR={result.snr_db:.1f} dB  "
-                       f"SINAD={result.sinad_db:.1f} dB  ENOB={result.enob:.2f} bits")
+    ax_spec.set_title(
+        f"Spectrum — SNR={result.snr_db:.1f} dB  "
+        f"SINAD={result.sinad_db:.1f} dB  ENOB={result.enob:.2f} bits"
+    )
     ax_spec.legend()
 
     fig.tight_layout()
@@ -163,42 +177,87 @@ def _save_report(path: pathlib.Path, result, channel_label: str):
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__,
-                                      formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     src = parser.add_mutually_exclusive_group()
     src.add_argument("--host", help="oscilloscope IP address (live acquisition)")
-    src.add_argument("--from-csv", type=pathlib.Path,
-                      help="analyze a previously saved capture instead of a live device")
+    src.add_argument(
+        "--from-csv",
+        type=pathlib.Path,
+        help="analyze a previously saved capture instead of a live device",
+    )
 
-    parser.add_argument("--suggest-freq", type=float, metavar="HZ",
-                         help="print the nearest coherent-sampling frequency to HZ for the given "
-                              "--fs-hz/--decim and --sample-size, then exit (no acquisition). Set "
-                              "your signal generator to the printed frequency for accurate SNR.")
+    parser.add_argument(
+        "--suggest-freq",
+        type=float,
+        metavar="HZ",
+        help="print the nearest coherent-sampling frequency to HZ for the given "
+        "--fs-hz/--decim and --sample-size, then exit (no acquisition). Set "
+        "your signal generator to the printed frequency for accurate SNR.",
+    )
     parser.add_argument("--port", type=int, default=8888)
-    parser.add_argument("--channel", type=int, choices=(1, 2), default=1,
-                         help="which channel to analyze (default: 1)")
-    parser.add_argument("--fs-hz", type=float,
-                         help="effective sample rate in Hz (required for --host unless --decim "
-                              "is given; ignored for --from-csv, whose file already records it)")
-    parser.add_argument("--decim", type=int,
-                         help="decimation factor to configure on the device before capturing "
-                              "(fs_hz = 80 MHz / decim if --fs-hz is not also given)")
-    parser.add_argument("--sample-size", type=int,
-                         help="capture depth to configure on the device before capturing "
-                              "(power of two, 1..8192)")
-    parser.add_argument("--n-bits", type=int, default=14, help="ADC resolution (default: 14)")
-    parser.add_argument("--n-harmonics", type=int, default=5,
-                         help="harmonics 2..N included in THD/SINAD (default: 5)")
-    parser.add_argument("--window", default="hann", choices=("hann", "hamming", "blackman", "rect"),
-                         help="FFT window (default: hann; use 'rect' only for coherent sampling)")
-    parser.add_argument("--timeout", type=float, default=10.0,
-                         help="live acquisition timeout in seconds (default: 10)")
-    parser.add_argument("--save-csv", type=pathlib.Path,
-                         help="save the raw captured waveform to this CSV path")
-    parser.add_argument("--save-report", type=pathlib.Path,
-                         help="save the computed metrics to this path (.json for JSON, else text)")
-    parser.add_argument("--save-plot", type=pathlib.Path,
-                         help="save a waveform+spectrum PNG plot (requires matplotlib)")
+    parser.add_argument(
+        "--channel",
+        type=int,
+        choices=(1, 2),
+        default=1,
+        help="which channel to analyze (default: 1)",
+    )
+    parser.add_argument(
+        "--fs-hz",
+        type=float,
+        help="effective sample rate in Hz (required for --host unless --decim "
+        "is given; ignored for --from-csv, whose file already records it)",
+    )
+    parser.add_argument(
+        "--decim",
+        type=int,
+        help="decimation factor to configure on the device before capturing "
+        "(fs_hz = 80 MHz / decim if --fs-hz is not also given)",
+    )
+    parser.add_argument(
+        "--sample-size",
+        type=int,
+        help="capture depth to configure on the device before capturing "
+        "(power of two, 1..8192)",
+    )
+    parser.add_argument(
+        "--n-bits", type=int, default=14, help="ADC resolution (default: 14)"
+    )
+    parser.add_argument(
+        "--n-harmonics",
+        type=int,
+        default=5,
+        help="harmonics 2..N included in THD/SINAD (default: 5)",
+    )
+    parser.add_argument(
+        "--window",
+        default="hann",
+        choices=("hann", "hamming", "blackman", "rect"),
+        help="FFT window (default: hann; use 'rect' only for coherent sampling)",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=10.0,
+        help="live acquisition timeout in seconds (default: 10)",
+    )
+    parser.add_argument(
+        "--save-csv",
+        type=pathlib.Path,
+        help="save the raw captured waveform to this CSV path",
+    )
+    parser.add_argument(
+        "--save-report",
+        type=pathlib.Path,
+        help="save the computed metrics to this path (.json for JSON, else text)",
+    )
+    parser.add_argument(
+        "--save-plot",
+        type=pathlib.Path,
+        help="save a waveform+spectrum PNG plot (requires matplotlib)",
+    )
 
     args = parser.parse_args()
     if len(sys.argv) == 1:
@@ -214,8 +273,10 @@ def main() -> int:
         fs_hz = args.fs_hz if args.fs_hz is not None else 80_000_000.0 / args.decim
         n = args.sample_size or 8192
         coherent_hz, k = suggest_coherent_frequency(args.suggest_freq, fs_hz, n)
-        print(f"Nearest coherent frequency to {args.suggest_freq:,.1f} Hz "
-              f"(fs={fs_hz:,.1f} Hz, N={n}): {coherent_hz:,.3f} Hz ({k} cycles/record)")
+        print(
+            f"Nearest coherent frequency to {args.suggest_freq:,.1f} Hz "
+            f"(fs={fs_hz:,.1f} Hz, N={n}): {coherent_hz:,.3f} Hz ({k} cycles/record)"
+        )
         return 0
 
     if not args.host and not args.from_csv:
@@ -225,22 +286,31 @@ def main() -> int:
         ch1, ch2, meta = load_capture_csv(args.from_csv)
         fs_hz = meta.fs_hz
         n_bits = meta.n_bits
-        print(f"Loaded {len(ch1)} samples from {args.from_csv} "
-              f"(fs_hz={fs_hz:,.1f}, n_bits={n_bits}, captured {meta.timestamp})")
+        print(
+            f"Loaded {len(ch1)} samples from {args.from_csv} "
+            f"(fs_hz={fs_hz:,.1f}, n_bits={n_bits}, captured {meta.timestamp})"
+        )
     else:
         if args.fs_hz is None and args.decim is None:
-            parser.error("--host requires --fs-hz or --decim so the frequency axis is known")
+            parser.error(
+                "--host requires --fs-hz or --decim so the frequency axis is known"
+            )
         fs_hz = args.fs_hz if args.fs_hz is not None else 80_000_000.0 / args.decim
         n_bits = args.n_bits
 
         try:
-            ch1, ch2 = asyncio.run(_live_acquire(
-                args.host, args.port, args.decim, args.sample_size, args.timeout))
+            ch1, ch2 = asyncio.run(
+                _live_acquire(
+                    args.host, args.port, args.decim, args.sample_size, args.timeout
+                )
+            )
         except (TimeoutError, DeviceError, OSError) as e:
             print(f"Acquisition failed: {e}", file=sys.stderr)
             return 1
 
-        print(f"Captured {len(ch1)} samples from {args.host}:{args.port} (fs_hz={fs_hz:,.1f})")
+        print(
+            f"Captured {len(ch1)} samples from {args.host}:{args.port} (fs_hz={fs_hz:,.1f})"
+        )
 
         if args.save_csv:
             save_capture_csv(args.save_csv, ch1, ch2, fs_hz, n_bits)
@@ -250,7 +320,8 @@ def main() -> int:
     channel_label = f"CH{args.channel}"
 
     result = compute_metrics(
-        samples, fs_hz, n_bits=n_bits, n_harmonics=args.n_harmonics, window=args.window)
+        samples, fs_hz, n_bits=n_bits, n_harmonics=args.n_harmonics, window=args.window
+    )
 
     print()
     print(format_report(result, channel_label))

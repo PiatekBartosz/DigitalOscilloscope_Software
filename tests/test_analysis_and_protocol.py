@@ -22,7 +22,10 @@ class CaptureIoTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = pathlib.Path(tmpdir) / "capture.csv"
             save_capture_csv(
-                path, ch1, ch2, fs_hz=8_000_000.0,
+                path,
+                ch1,
+                ch2,
+                fs_hz=8_000_000.0,
                 metadata={"decim_factor": 10, "trigger_mode": "normal"},
                 ch1_volts=np.array([-5.0, -4.99, 0.0, 4.999]),
                 ch2_volts=np.array([4.999, 0.0, -4.99, -5.0]),
@@ -40,7 +43,9 @@ class CaptureIoTests(unittest.TestCase):
         cycles = 73
         sample_index = np.arange(n)
         samples = np.round(8192 + 7000 * np.sin(2 * np.pi * cycles * sample_index / n))
-        result = compute_metrics(samples, fs_hz=80_000_000.0, window="rect", leakage_bins=0)
+        result = compute_metrics(
+            samples, fs_hz=80_000_000.0, window="rect", leakage_bins=0
+        )
 
         self.assertTrue(result.is_coherent)
         self.assertEqual(result.fundamental_bin, cycles)
@@ -62,13 +67,32 @@ class ProtocolParserTests(unittest.TestCase):
     def test_parser_handles_text_and_fragmented_binary_frame(self):
         frames = []
         replies = []
-        client = CommandClient("unused", 0, frame_cb=lambda *args: frames.append(args),
-                               text_cb=replies.append)
-        payload = bytes([
-            0xAD, 0xC1, 0, 0, 0, 7, 0, 2,
-            0x00, 0x01, 0x3F, 0xFF,
-            0x20, 0x00, 0x00, 0x02,
-        ])
+        client = CommandClient(
+            "unused",
+            0,
+            frame_cb=lambda *args: frames.append(args),
+            text_cb=replies.append,
+        )
+        payload = bytes(
+            [
+                0xAD,
+                0xC1,
+                0,
+                0,
+                0,
+                7,
+                0,
+                2,
+                0x00,
+                0x01,
+                0x3F,
+                0xFF,
+                0x20,
+                0x00,
+                0x00,
+                0x02,
+            ]
+        )
 
         remaining = client._parse_frames(bytearray(b"OK\n" + payload[:11]))
         self.assertEqual(replies, ["OK"])
