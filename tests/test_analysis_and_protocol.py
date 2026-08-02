@@ -1,6 +1,8 @@
 """Regression tests for the measurement CSV contract and TCP frame parser."""
 
+import os
 import pathlib
+import queue
 import sys
 import tempfile
 import unittest
@@ -13,6 +15,11 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from analysis.capture_io import load_capture_csv, save_capture_csv
 from analysis.metrics import compute_metrics
 from core.command_client import CommandClient
+
+# UI layout tests run without a desktop session in CI.
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+from PyQt6.QtWidgets import QApplication
+from ui.oscilloscope import Oscilloscope
 
 
 class CaptureIoTests(unittest.TestCase):
@@ -106,6 +113,39 @@ class ProtocolParserTests(unittest.TestCase):
         self.assertEqual(sequence, 7)
         np.testing.assert_array_equal(ch1, np.array([1, 8192], dtype=np.uint16))
         np.testing.assert_array_equal(ch2, np.array([16383, 2], dtype=np.uint16))
+
+
+class OscilloscopeLayoutTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance() or QApplication([])
+
+    def test_sidebar_controls_fit_without_horizontal_clipping(self):
+        scope = Oscilloscope(None, queue.Queue())
+        scope.show()
+        self.app.processEvents()
+        try:
+            sidebar_width = scope._sidebar_scroll.viewport().width()
+            content_width = scope._sidebar_scroll.widget().sizeHint().width()
+            self.assertLessEqual(content_width, sidebar_width)
+        finally:
+            scope.close()
+            scope.deleteLater()
+
+    def test_small_timebases_reduce_capture_depth(self):
+        expected_depths = {
+            200e-9: 256,
+            500e-9: 512,
+            1e-6: 1024,
+            2e-6: 2048,
+            5e-6: 4096,
+            10e-6: 8192,
+        }
+        for target, expected_depth in expected_depths.items():
+            self.assertEqual(
+                Oscilloscope._largest_compatible_capture_size(target), expected_depth
+            )
+
 
 
 if __name__ == "__main__":
