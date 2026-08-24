@@ -1,15 +1,16 @@
-import sys
 import argparse
 import asyncio
 import logging
-import threading
 import queue
 import signal
+import sys
+import threading
 
 from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QApplication
-from ui.oscilloscope import Oscilloscope
+
 from core.connection_manager import ConnectionManager
+from ui.oscilloscope import Oscilloscope
 
 logger = logging.getLogger()
 
@@ -31,14 +32,14 @@ def main():
 
     def on_frame(seq: int, ch1, ch2):
         try:
-            frame_queue.put_nowait((ch1, ch2))
+            frame_queue.put_nowait((seq, ch1, ch2))
         except queue.Full:
             try:
                 frame_queue.get_nowait()
             except queue.Empty:
                 pass
             try:
-                frame_queue.put_nowait((ch1, ch2))
+                frame_queue.put_nowait((seq, ch1, ch2))
             except queue.Full:
                 pass
 

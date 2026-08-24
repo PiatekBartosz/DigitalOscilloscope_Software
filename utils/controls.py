@@ -79,7 +79,8 @@ def create_float_dial_widget(
     value.setSingleStep(1.0 / scale)
     value.setValue(init_val)
     value.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    value.setFixedWidth(65)
+    # Allow a complete value such as ``100.00`` together with the spin buttons.
+    value.setFixedWidth(80)
 
     debounce_timer = QTimer(dial)
     debounce_timer.setSingleShot(True)

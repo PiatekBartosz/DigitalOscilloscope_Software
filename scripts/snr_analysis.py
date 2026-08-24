@@ -11,12 +11,22 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 import numpy as np
 
 from analysis.capture_io import load_capture_csv, save_capture_csv
-from analysis.metrics import compute_metrics, format_report, suggest_coherent_frequency
+from analysis.metrics import (
+    average_centered_channels,
+    compute_metrics,
+    compute_noise_metrics,
+    format_noise_report,
+    format_report,
+    suggest_coherent_frequency,
+)
+from analysis.plot_style import format_thesis_axis
 from core.command_client import CommandClient
 
 
 SCRIPTS_DIR = pathlib.Path(__file__).resolve().parent
 IMPLEMENTATION_RESULTS_DIR = SCRIPTS_DIR / "results" / "implementation"
+ADC_SAMPLE_RATE_HZ = 80_000_000.0
+DEFAULT_CAPTURE_SAMPLES = 8192
 
 
 class DeviceError(RuntimeError):
@@ -34,10 +44,21 @@ def configure_interactively(args: argparse.Namespace) -> None:
     if source not in {"capture", "live"}:
         raise ValueError("analysis source must be 'capture' or 'live'")
 
-    args.channel = int(_prompt("Channel", str(args.channel)))
-    if args.channel not in (1, 2):
-        raise ValueError("channel must be 1 or 2")
-    args.n_harmonics = int(_prompt("Number of harmonics", str(args.n_harmonics)))
+    args.channel = _prompt("Channel (1/2/average)", str(args.channel)).lower()
+    if args.channel not in {"1", "2", "average"}:
+        raise ValueError("channel must be 1, 2, or average")
+    mode = _prompt("Analysis mode (dynamic/noise)", "dynamic").lower()
+    if mode not in {"dynamic", "noise"}:
+        raise ValueError("analysis mode must be dynamic or noise")
+    args.noise_only = mode == "noise"
+    if args.noise_only:
+        args.adc_range_vpp = float(
+            _prompt("ADC differential range (Vpp)", "2")
+        )
+    else:
+        args.n_harmonics = int(
+            _prompt("Number of harmonics", str(args.n_harmonics))
+        )
     args.window = _prompt("FFT window (hann/hamming/blackman/rect)", args.window)
     if args.window not in {"hann", "hamming", "blackman", "rect"}:
         raise ValueError("unsupported FFT window")
@@ -53,6 +74,63 @@ def configure_interactively(args: argparse.Namespace) -> None:
 
     args.save_report = IMPLEMENTATION_RESULTS_DIR / f"{base_name}.json"
     args.save_plot = IMPLEMENTATION_RESULTS_DIR / f"{base_name}.png"
+
+
+def select_channel_samples(
+    ch1: np.ndarray, ch2: np.ndarray, channel: str
+) -> tuple[np.ndarray, str]:
+    if channel == "1":
+        return np.asarray(ch1), "CH1"
+    if channel == "2":
+        return np.asarray(ch2), "CH2"
+    if channel == "average":
+        return average_centered_channels(ch1, ch2), "(CH1+CH2)/2"
+    raise ValueError("channel must be 1, 2, or average")
+
+
+def _metadata_range(fields: dict[str, str], channel: int) -> float | None:
+    for key in (
+        f"firmware_afe_ch{channel}_range_vpp",
+        f"afe_ch{channel}_range_vpp",
+        f"adc_range_vpp_ch{channel}",
+    ):
+        value = fields.get(key)
+        if value not in (None, ""):
+            try:
+                parsed = float(value)
+            except ValueError:
+                continue
+            if parsed in (1.0, 2.0):
+                return parsed
+    return None
+
+
+def resolve_adc_range_vpp(
+    requested: float | None, fields: dict[str, str], channel: str
+) -> float:
+    relevant_channels = (1, 2) if channel == "average" else (int(channel),)
+    recorded = [_metadata_range(fields, number) for number in relevant_channels]
+    known_recorded = [value for value in recorded if value is not None]
+
+    if channel == "average" and len(known_recorded) == 2:
+        if not np.isclose(known_recorded[0], known_recorded[1]):
+            raise ValueError("CH1 and CH2 have different recorded ADC ranges")
+
+    if requested is not None:
+        if requested not in (1.0, 2.0):
+            raise ValueError("ADC range must be 1 or 2 Vpp")
+        if any(not np.isclose(value, requested) for value in known_recorded):
+            raise ValueError("requested ADC range conflicts with capture metadata")
+        return float(requested)
+
+    if channel == "average" and len(known_recorded) != 2:
+        raise ValueError(
+            "average-channel noise analysis needs both recorded ADC ranges or "
+            "--adc-range-vpp"
+        )
+    if known_recorded:
+        return float(known_recorded[0])
+    raise ValueError("noise analysis needs --adc-range-vpp or ADC-range metadata")
 
 
 async def _wait_for_reply(text_lines: list[str], timeout: float) -> str:
@@ -120,34 +198,62 @@ def _save_plot(
     fig, (ax_time, ax_spec) = plt.subplots(2, 1, figsize=(9, 6))
 
     t = np.arange(len(samples)) / fs_hz
-    ax_time.plot(t * 1e3, samples, linewidth=0.8)
-    ax_time.set_xlabel("Time (ms)")
-    ax_time.set_ylabel(f"{channel_label} code")
-    ax_time.set_title("Captured waveform")
+    ax_time.plot(t * 1e3, samples, linewidth=0.8, label=channel_label)
+    format_thesis_axis(ax_time, "Czas (ms)", "Kod ADC ze znakiem")
 
     plot_floor_dbfs = -180.0
     spectrum_plot_dbfs = np.maximum(result.spectrum_dbfs, plot_floor_dbfs)
-    ax_spec.plot(result.freqs_hz / 1e3, spectrum_plot_dbfs, linewidth=0.8)
+    ax_spec.plot(result.freqs_hz / 1e3, spectrum_plot_dbfs, linewidth=0.8, label="Widmo")
     ax_spec.axvline(
         result.fundamental_freq_hz / 1e3,
         color="r",
         linestyle="--",
         linewidth=0.8,
-        label="fundamental",
+        label="Częstotliwość podstawowa",
     )
     display_max_hz = min(
         result.freqs_hz[-1], max(10.0 * result.fundamental_freq_hz, 1.0)
     )
-    ax_spec.set_xlim(0.0, display_max_hz / 1e3)
+    ax_spec.set_xlim(result.freqs_hz[0] / 1e3, display_max_hz / 1e3)
     peak_dbfs = float(np.max(spectrum_plot_dbfs))
     ax_spec.set_ylim(plot_floor_dbfs, max(0.0, peak_dbfs + 6.0))
-    ax_spec.set_xlabel("Frequency (kHz)")
-    ax_spec.set_ylabel("dBFS")
-    ax_spec.set_title(
-        f"Spectrum — SNR={result.snr_db:.1f} dB  "
-        f"SINAD={result.sinad_db:.1f} dB  ENOB={result.enob:.2f} bits"
+    format_thesis_axis(ax_spec, "Częstotliwość (kHz)", "Amplituda (dBFS)")
+
+    fig.tight_layout()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=150)
+    print(f"Saved plot -> {path}")
+
+
+def _save_noise_plot(
+    path: pathlib.Path, samples: np.ndarray, fs_hz: float, result, channel_label: str
+):
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print(
+            "matplotlib not installed — skipping --save-plot (pip install matplotlib)",
+            file=sys.stderr,
+        )
+        return
+
+    centered = np.asarray(samples, dtype=np.float64) - np.mean(samples)
+    time_s = np.arange(len(centered)) / fs_hz
+    fig, (ax_time, ax_spec) = plt.subplots(2, 1, figsize=(9, 6))
+    ax_time.plot(time_s * 1e3, centered, linewidth=0.8, label=channel_label)
+    format_thesis_axis(ax_time, "Czas (ms)", "Kod ADC względem średniej")
+
+    ax_spec.plot(
+        result.freqs_hz / 1e6,
+        result.spectrum_dbfs_per_hz,
+        linewidth=0.8,
+        label="Gęstość widmowa szumu",
     )
-    ax_spec.legend()
+    format_thesis_axis(ax_spec, "Częstotliwość (MHz)", "Poziom (dBFS/Hz)")
+    ax_spec.set_xlim(result.freqs_hz[0] / 1e6, result.freqs_hz[-1] / 1e6)
 
     fig.tight_layout()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -161,18 +267,41 @@ def _save_report(path: pathlib.Path, result, channel_label: str):
         payload = {
             "channel": channel_label,
             "snr_db": result.snr_db,
-            "thd_db": result.thd_db,
-            "thd_percent": result.thd_percent,
             "sinad_db": result.sinad_db,
             "enob": result.enob,
-            "sfdr_db": result.sfdr_db,
             "noise_floor_dbfs": result.noise_floor_dbfs,
             "fundamental_freq_hz": result.fundamental_freq_hz,
             "n_harmonics_used": result.n_harmonics_used,
+            "harmonic_levels_dbc": list(result.harmonic_levels_dbc),
         }
         path.write_text(json.dumps(payload, indent=2))
     else:
         path.write_text(format_report(result, channel_label) + "\n")
+    print(f"Saved report -> {path}")
+
+
+def _save_noise_report(
+    path: pathlib.Path, result, channel_label: str, adc_range_vpp: float
+):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.suffix.lower() == ".json":
+        payload = {
+            "analysis": "zero_input_noise",
+            "channel": channel_label,
+            "adc_range_vpp": adc_range_vpp,
+            "dc_code": result.dc_code,
+            "noise_rms_codes": result.noise_rms_codes,
+            "noise_rms_adc_volts": result.noise_rms_adc_volts,
+            "noise_floor_dbfs_per_bin": result.noise_floor_dbfs_per_bin,
+            "noise_density_dbfs_per_hz": result.noise_density_dbfs_per_hz,
+            "equivalent_noise_bandwidth_hz": result.equivalent_noise_bandwidth_hz,
+            "dc_bin_excluded": True,
+        }
+        path.write_text(json.dumps(payload, indent=2))
+    else:
+        path.write_text(
+            format_noise_report(result, channel_label, adc_range_vpp) + "\n"
+        )
     print(f"Saved report -> {path}")
 
 
@@ -199,10 +328,21 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=8888)
     parser.add_argument(
         "--channel",
-        type=int,
-        choices=(1, 2),
-        default=1,
-        help="which channel to analyze (default: 1)",
+        choices=("1", "2", "average"),
+        default="1",
+        help="analyze CH1, CH2, or their sample-wise average (default: 1)",
+    )
+    parser.add_argument(
+        "--noise-only",
+        action="store_true",
+        help="measure grounded-input noise without searching for a fundamental",
+    )
+    parser.add_argument(
+        "--adc-range-vpp",
+        type=float,
+        choices=(1.0, 2.0),
+        help="physical differential ADC range for noise conversion; read from "
+        "capture metadata when possible",
     )
     parser.add_argument(
         "--fs-hz",
@@ -229,7 +369,7 @@ def main() -> int:
         "--n-harmonics",
         type=int,
         default=5,
-        help="harmonics 2..N included in THD/SINAD (default: 5)",
+        help="harmonics 2..N included in SINAD and reported individually (default: 5)",
     )
     parser.add_argument(
         "--window",
@@ -270,8 +410,8 @@ def main() -> int:
     if args.suggest_freq is not None:
         if args.fs_hz is None and args.decim is None:
             parser.error("--suggest-freq requires --fs-hz or --decim")
-        fs_hz = args.fs_hz if args.fs_hz is not None else 80_000_000.0 / args.decim
-        n = args.sample_size or 8192
+        fs_hz = args.fs_hz if args.fs_hz is not None else ADC_SAMPLE_RATE_HZ / args.decim
+        n = args.sample_size or DEFAULT_CAPTURE_SAMPLES
         coherent_hz, k = suggest_coherent_frequency(args.suggest_freq, fs_hz, n)
         print(
             f"Nearest coherent frequency to {args.suggest_freq:,.1f} Hz "
@@ -286,6 +426,7 @@ def main() -> int:
         ch1, ch2, meta = load_capture_csv(args.from_csv)
         fs_hz = meta.fs_hz
         n_bits = meta.n_bits
+        metadata_fields = meta.fields
         print(
             f"Loaded {len(ch1)} samples from {args.from_csv} "
             f"(fs_hz={fs_hz:,.1f}, n_bits={n_bits}, captured {meta.timestamp})"
@@ -295,8 +436,9 @@ def main() -> int:
             parser.error(
                 "--host requires --fs-hz or --decim so the frequency axis is known"
             )
-        fs_hz = args.fs_hz if args.fs_hz is not None else 80_000_000.0 / args.decim
+        fs_hz = args.fs_hz if args.fs_hz is not None else ADC_SAMPLE_RATE_HZ / args.decim
         n_bits = args.n_bits
+        metadata_fields = {}
 
         try:
             ch1, ch2 = asyncio.run(
@@ -316,8 +458,32 @@ def main() -> int:
             save_capture_csv(args.save_csv, ch1, ch2, fs_hz, n_bits)
             print(f"Saved capture -> {args.save_csv}")
 
-    samples = ch1 if args.channel == 1 else ch2
-    channel_label = f"CH{args.channel}"
+    samples, channel_label = select_channel_samples(ch1, ch2, args.channel)
+
+    if args.noise_only:
+        try:
+            adc_range_vpp = resolve_adc_range_vpp(
+                args.adc_range_vpp, metadata_fields, args.channel
+            )
+        except ValueError as error:
+            parser.error(str(error))
+        result = compute_noise_metrics(
+            samples,
+            fs_hz,
+            adc_range_vpp=adc_range_vpp,
+            n_bits=n_bits,
+            window=args.window,
+        )
+
+        print()
+        print(format_noise_report(result, channel_label, adc_range_vpp))
+        if args.save_report:
+            _save_noise_report(
+                args.save_report, result, channel_label, adc_range_vpp
+            )
+        if args.save_plot:
+            _save_noise_plot(args.save_plot, samples, fs_hz, result, channel_label)
+        return 0
 
     result = compute_metrics(
         samples, fs_hz, n_bits=n_bits, n_harmonics=args.n_harmonics, window=args.window

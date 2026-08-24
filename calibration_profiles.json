@@ -1,0 +1,91 @@
+{
+  "schema_version": 3,
+  "profiles": {
+    "ch1_1to1_1vpp": {
+      "channel": 1,
+      "attenuation": "1:1",
+      "sense_vpp": 1.0,
+      "adc_format": "Offset Binary",
+      "points": [
+        {"volts_per_div": 0.02, "gain_pct": 49.5, "volts_per_code": 1.0040444607857001e-05},
+        {"volts_per_div": 0.05, "gain_pct": 45.44, "volts_per_code": 2.4411651763673265e-05}
+      ]
+    },
+    "ch1_1to1_2vpp": {
+      "channel": 1,
+      "attenuation": "1:1",
+      "sense_vpp": 2.0,
+      "adc_format": "Offset Binary",
+      "points": [
+        {"volts_per_div": 0.02, "gain_pct": 52.5, "volts_per_code": 1.0224139048291055e-05},
+        {"volts_per_div": 0.05, "gain_pct": 48.5, "volts_per_code": 2.4988593689678167e-05}
+      ]
+    },
+    "ch1_1to100_1vpp": {
+      "channel": 1,
+      "attenuation": "1:100",
+      "sense_vpp": 1.0,
+      "adc_format": "Offset Binary",
+      "points": [
+        {"volts_per_div": 0.5, "gain_pct": 55.5, "volts_per_code": 0.0002468212933546516},
+        {"volts_per_div": 1.0, "gain_pct": 52.53, "volts_per_code": 0.00048778819183142917},
+        {"volts_per_div": 2.0, "gain_pct": 49.66, "volts_per_code": 0.0009375472554060184},
+        {"volts_per_div": 5.0, "gain_pct": 45.0, "volts_per_code": 0.002629866074070178}
+      ]
+    },
+    "ch1_1to100_2vpp": {
+      "channel": 1,
+      "attenuation": "1:100",
+      "sense_vpp": 2.0,
+      "adc_format": "Offset Binary",
+      "points": [
+        {"volts_per_div": 1.0, "gain_pct": 55.5, "volts_per_code": 0.0005011421542786856},
+        {"volts_per_div": 2.0, "gain_pct": 52.5, "volts_per_code": 0.0010022843085573713},
+        {"volts_per_div": 5.0, "gain_pct": 48.0, "volts_per_code": 0.002708283963573581}
+      ]
+    },
+    "ch2_1to1_1vpp": {
+      "channel": 2,
+      "attenuation": "1:1",
+      "sense_vpp": 1.0,
+      "adc_format": "Offset Binary",
+      "points": [
+        {"volts_per_div": 0.02, "gain_pct": 49.5, "volts_per_code": 9.851669927430656e-06},
+        {"volts_per_div": 0.05, "gain_pct": 45.44, "volts_per_code": 2.464060023394727e-05}
+      ]
+    },
+    "ch2_1to1_2vpp": {
+      "channel": 2,
+      "attenuation": "1:1",
+      "sense_vpp": 2.0,
+      "adc_format": "Offset Binary",
+      "points": [
+        {"volts_per_div": 0.02, "gain_pct": 52.5, "volts_per_code": 1.0274220389262716e-05},
+        {"volts_per_div": 0.05, "gain_pct": 48.5, "volts_per_code": 2.4988593689678167e-05}
+      ]
+    },
+    "ch2_1to100_1vpp": {
+      "channel": 2,
+      "attenuation": "1:100",
+      "sense_vpp": 1.0,
+      "adc_format": "Offset Binary",
+      "points": [
+        {"volts_per_div": 0.5, "gain_pct": 55.5, "volts_per_code": 0.0002533570159857904},
+        {"volts_per_div": 1.0, "gain_pct": 52.53, "volts_per_code": 0.0004923523115699341},
+        {"volts_per_div": 2.0, "gain_pct": 49.66, "volts_per_code": 0.0009534762433303467},
+        {"volts_per_div": 5.0, "gain_pct": 45.0, "volts_per_code": 0.002647568869885228}
+      ]
+    },
+    "ch2_1to100_2vpp": {
+      "channel": 2,
+      "attenuation": "1:100",
+      "sense_vpp": 2.0,
+      "adc_format": "Offset Binary",
+      "points": [
+        {"volts_per_div": 1.0, "gain_pct": 55.5, "volts_per_code": 0.0005023390824033367},
+        {"volts_per_div": 2.0, "gain_pct": 52.5, "volts_per_code": 0.0010022843085573713},
+        {"volts_per_div": 5.0, "gain_pct": 48.0, "volts_per_code": 0.002749273160908085}
+      ]
+    }
+  }
+}

@@ -18,6 +18,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 import numpy as np
 
 from analysis.capture_io import load_capture_csv
+from analysis.plot_style import format_thesis_axis
 
 
 def _time_axis(samples: int, sample_rate_hz: float) -> tuple[np.ndarray, str]:
@@ -71,25 +72,19 @@ def main() -> int:
     time, time_unit = _time_axis(len(ch1), metadata.fs_hz)
     if args.raw_codes:
         ch1_plot, ch2_plot = ch1, ch2
-        y_label = "ADC code (unsigned)"
+        y_label = "Kod ADC bez znaku"
     else:
         ch1_plot = _signed_codes(ch1, metadata.n_bits)
         ch2_plot = _signed_codes(ch2, metadata.n_bits)
-        y_label = "ADC code (signed)"
+        y_label = "Kod ADC ze znakiem"
 
     fig, axis = plt.subplots(figsize=(12, 7), constrained_layout=True)
     if args.channels in ("1", "both"):
-        axis.plot(time, ch1_plot, color="tab:orange", linewidth=0.8, label="CH1")
+        axis.plot(time, ch1_plot, color="tab:orange", linewidth=0.8, label="Kanał 1")
     if args.channels in ("2", "both"):
-        axis.plot(time, ch2_plot, color="tab:cyan", linewidth=0.8, label="CH2")
+        axis.plot(time, ch2_plot, color="tab:cyan", linewidth=0.8, label="Kanał 2")
 
-    axis.set_title(
-        f"{args.capture.name} — {len(ch1)} samples at {metadata.fs_hz:g} samples/s"
-    )
-    axis.set_xlabel(f"Time ({time_unit})")
-    axis.set_ylabel(y_label)
-    axis.grid(True, alpha=0.35)
-    axis.legend()
+    format_thesis_axis(axis, f"Czas ({time_unit})", y_label)
     fig.canvas.manager.set_window_title(f"Time-domain capture: {args.capture.name}")
     plt.show()
     return 0

@@ -14,6 +14,9 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import pyqtSignal as Signal, Qt
 from PyQt6.QtGui import QTextCursor, QColor
 
+SAMPLE_SIZES = (128, 256, 512, 1024, 2048, 4096, 8192)
+SAMPLE_SIZE_PRESETS = [(f"Samples: {count}", f"afe sample_size {count}") for count in SAMPLE_SIZES]
+
 _PRESETS = [
     ("── Presets ──", ""),
     ("CH1 gain …", "afe gain 1 "),
@@ -44,14 +47,7 @@ _PRESETS = [
     ("Raw: write+read", "raw_write_read"),
     ("Raw: reset write ptr", "raw_reset_write_ptr"),
     ("── Sample size ──", ""),
-    ("Samples: 128", "afe sample_size 128"),
-    ("Samples: 256", "afe sample_size 256"),
-    ("Samples: 512", "afe sample_size 512"),
-    ("Samples: 1024", "afe sample_size 1024"),
-    ("Samples: 2048", "afe sample_size 2048"),
-    ("Samples: 4096", "afe sample_size 4096"),
-    ("Samples: 8192", "afe sample_size 8192"),
-]
+] + SAMPLE_SIZE_PRESETS
 
 
 class CommandPanel(QWidget):

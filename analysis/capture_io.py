@@ -13,7 +13,7 @@ import csv
 import dataclasses
 import datetime
 import pathlib
-from typing import Mapping
+from collections.abc import Mapping
 
 import numpy as np
 
@@ -53,12 +53,12 @@ def save_capture_csv(
         if len(ch1_volts) != len(ch1) or len(ch2_volts) != len(ch2):
             raise ValueError("voltage and raw-code arrays must have equal lengths")
 
-    timestamp = datetime.datetime.now().isoformat(timespec="seconds")
+    timestamp = datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds")
     path = pathlib.Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(path, "w", newline="") as f:
-        f.write(f"# DigitalOscilloscope capture\n")
+        f.write("# DigitalOscilloscope capture\n")
         f.write("# format_version=2\n")
         f.write(f"# fs_hz={fs_hz!r}\n")
         f.write(f"# n_bits={n_bits}\n")
