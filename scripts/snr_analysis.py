@@ -272,7 +272,7 @@ def _save_report(path: pathlib.Path, result, channel_label: str):
             "noise_floor_dbfs": result.noise_floor_dbfs,
             "fundamental_freq_hz": result.fundamental_freq_hz,
             "n_harmonics_used": result.n_harmonics_used,
-            "harmonic_levels_dbc": list(result.harmonic_levels_dbc),
+            "harmonic_levels_dbfs": list(result.harmonic_levels_dbfs),
         }
         path.write_text(json.dumps(payload, indent=2))
     else:

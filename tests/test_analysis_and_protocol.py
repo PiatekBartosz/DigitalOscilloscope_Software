@@ -38,12 +38,25 @@ from ui.oscilloscope import (
     FFT_Y_DIVISION_DB,
     FFT_Y_MAX_DBFS,
     FFT_Y_MIN_DBFS,
+    MAX_DISPLAY_POINTS,
     Oscilloscope,
 )
 from utils.vertical_scales import requested_volts_per_div_values
 
 
 class CaptureIoTests(unittest.TestCase):
+    def test_fft_display_reduction_preserves_local_extrema(self):
+        levels = np.zeros(4096)
+        levels[512] = 10.0
+        levels[513] = -10.0
+
+        indices = Oscilloscope._display_indices(levels)
+
+        self.assertLessEqual(len(indices), MAX_DISPLAY_POINTS)
+        self.assertTrue(np.all(np.diff(indices) > 0))
+        self.assertIn(512, indices)
+        self.assertIn(513, indices)
+
     def test_synthetic_capture_recovers_known_snr_sinad_and_enob(self):
         _, result, expected = verify()
 
@@ -267,6 +280,36 @@ class OscilloscopeLayoutTests(unittest.TestCase):
             self.assertEqual(scope.decimation, 1)
             self.assertEqual(scope._timebase_target, 10e-6)
             self.assertAlmostEqual(scope._time_per_div(scope.decimation), 10.24e-6)
+        finally:
+            scope.close()
+            scope.deleteLater()
+
+    def test_decimation_study_preset_applies_frequency_and_decimation(self):
+        scope = Oscilloscope(None, queue.Queue())
+        try:
+            study_index = scope._series_study_combo.findData("decimation")
+            scope._series_study_combo.setCurrentIndex(study_index)
+            point_index = next(
+                index
+                for index in range(scope._series_decimation_point_combo.count())
+                if scope._series_decimation_point_combo.itemData(index)["decimation"] == 50
+            )
+            scope._series_decimation_point_combo.setCurrentIndex(point_index)
+
+            self.assertEqual(scope._decimation_spinbox.value(), 50)
+            self.assertEqual(scope.decimation, 50)
+            self.assertEqual(scope._series_frequency.value(), 100_000.0)
+            self.assertEqual(scope._series_amplitude.value(), 0.13)
+            self.assertFalse(scope._series_generator_frequency_confirmed.isChecked())
+            self.assertIn("16 samples/period", scope._series_decimation_instruction.text())
+
+            error = scope._series_setup_error()
+            self.assertIn("Confirm that the physical SENSE", error)
+            scope._series_sense_confirmed.setChecked(True)
+            error = scope._series_setup_error()
+            self.assertIn("Confirm that the generator frequency", error)
+            scope._series_generator_frequency_confirmed.setChecked(True)
+            self.assertIsNone(scope._series_setup_error())
         finally:
             scope.close()
             scope.deleteLater()

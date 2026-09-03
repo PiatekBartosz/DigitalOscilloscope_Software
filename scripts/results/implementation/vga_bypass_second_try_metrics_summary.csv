@@ -1,0 +1,3 @@
+channel,configuration,capture_count,snr_db_mean,snr_db_std,sinad_db_mean,sinad_db_std,enob_mean,enob_std,thd_db_mean,thd_db_std,sfdr_db_mean,sfdr_db_std,noise_floor_dbfs_per_bin_mean,noise_floor_dbfs_per_bin_std,minimum_code,maximum_code,noncoherent_captures,firmware_overflow_flags
+1,"kanał 1, VGA pominięty",10,34.302043,2.477054,29.238663,1.754332,4.564562,0.291417,-30.918971,1.476274,33.846458,1.741557,-69.555958,2.437902,454,15242,0,10
+2,"kanał 2, VGA aktywny",10,32.129238,0.292470,31.828208,0.256660,4.994719,0.042635,-43.874039,1.597602,43.168758,1.330760,-67.041835,0.288815,73,16201,0,10

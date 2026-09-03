@@ -77,6 +77,13 @@ FFT_Y_DIVISION_DB = 10
 MAX_SERIES_CAPTURES = 1000
 MAX_INVALID_SERIES_FRAMES = 3
 DEFAULT_TIMEBASE_SECONDS = 10e-6
+DECIMATION_STUDY_POINTS = (
+    ("5 MHz, D = 1", 5_000_000.0, 1, "5MHz_d001"),
+    ("1 MHz, D = 5", 1_000_000.0, 5, "1MHz_d005"),
+    ("500 kHz, D = 10", 500_000.0, 10, "500kHz_d010"),
+    ("100 kHz, D = 50", 100_000.0, 50, "100kHz_d050"),
+    ("50 kHz, D = 100", 50_000.0, 100, "50kHz_d100"),
+)
 
 AFE_ATTEN_1_TO_1 = 953_000.0 / (49_900.0 + 953_000.0)
 AFE_ATTEN_1_TO_100 = 10_000.0 / (1_000_000.0 + 10_000.0)
@@ -390,6 +397,30 @@ class Oscilloscope(QMainWindow):
         )
         series_layout.addWidget(self._series_study_combo)
 
+        self._series_decimation_point_label = QLabel("Decimation study point")
+        series_layout.addWidget(self._series_decimation_point_label)
+        self._series_decimation_point_combo = QComboBox()
+        for label, frequency_hz, decimation, filename_token in DECIMATION_STUDY_POINTS:
+            self._series_decimation_point_combo.addItem(
+                label,
+                {
+                    "frequency_hz": frequency_hz,
+                    "decimation": decimation,
+                    "filename_token": filename_token,
+                },
+            )
+        self._series_decimation_point_combo.currentIndexChanged.connect(
+            self._on_series_decimation_point_change
+        )
+        series_layout.addWidget(self._series_decimation_point_combo)
+        self._series_decimation_instruction = QLabel()
+        self._series_decimation_instruction.setWordWrap(True)
+        series_layout.addWidget(self._series_decimation_instruction)
+        self._series_generator_frequency_confirmed = QCheckBox(
+            "Generator frequency set to the selected point"
+        )
+        series_layout.addWidget(self._series_generator_frequency_confirmed)
+
         series_layout.addWidget(QLabel("Input condition"))
         self._series_input_combo = QComboBox()
         self._series_input_combo.addItem("Grounded inputs", "grounded")
@@ -461,6 +492,8 @@ class Oscilloscope(QMainWindow):
         series_layout.addWidget(self._series_progress)
         self._series_controls = (
             self._series_study_combo,
+            self._series_decimation_point_combo,
+            self._series_generator_frequency_confirmed,
             self._series_input_combo,
             self._series_waveform_combo,
             self._series_frequency,
@@ -2438,7 +2471,13 @@ class Oscilloscope(QMainWindow):
     def _on_series_study_change(self) -> None:
         if not hasattr(self, "_series_study_combo"):
             return
-        is_noise = self._series_study_combo.currentData() == "noise"
+        study = self._series_study_combo.currentData()
+        is_noise = study == "noise"
+        is_decimation = study == "decimation"
+        self._series_decimation_point_label.setVisible(is_decimation)
+        self._series_decimation_point_combo.setVisible(is_decimation)
+        self._series_decimation_instruction.setVisible(is_decimation)
+        self._series_generator_frequency_confirmed.setVisible(is_decimation)
         self._series_input_combo.setCurrentIndex(
             self._series_input_combo.findData(
                 "grounded" if is_noise else "generator_splitter"
@@ -2453,6 +2492,29 @@ class Oscilloscope(QMainWindow):
             self._series_generator_offset.setValue(0.0)
         elif self._series_frequency.value() == 0.0:
             self._series_frequency.setValue(5_000_000.0)
+        if is_decimation and hasattr(self, "_decimation_spinbox"):
+            self._on_series_decimation_point_change()
+
+    def _on_series_decimation_point_change(self) -> None:
+        if not hasattr(self, "_series_decimation_point_combo"):
+            return
+        point = self._series_decimation_point_combo.currentData()
+        if not isinstance(point, dict):
+            return
+        frequency_hz = float(point["frequency_hz"])
+        decimation = int(point["decimation"])
+        effective_sample_rate_hz = ADC_SAMPLE_RATE_HZ / decimation
+        self._series_frequency.setValue(frequency_hz)
+        if hasattr(self, "_decimation_spinbox"):
+            self._decimation_spinbox.setValue(decimation)
+        if self._series_amplitude.value() == 0.0:
+            self._series_amplitude.setValue(0.13)
+        self._series_generator_frequency_confirmed.setChecked(False)
+        self._series_decimation_instruction.setText(
+            f"Set the generator manually to {frequency_hz:g} Hz. "
+            f"The GUI applies D = {decimation}; effective Fs = "
+            f"{effective_sample_rate_hz:g} Hz; expected 16 samples/period."
+        )
 
     def _series_setup_error(self) -> str | None:
         if not self._series_sense_confirmed.isChecked():
@@ -2470,11 +2532,26 @@ class Oscilloscope(QMainWindow):
             and waveform != "off"
         ):
             return "Disable the generator output for grounded-input measurements."
+        if self._series_study_combo.currentData() == "decimation":
+            point = self._series_decimation_point_combo.currentData()
+            if not isinstance(point, dict):
+                return "Select a decimation study point."
+            if self._decimation_spinbox.value() != int(point["decimation"]):
+                return "The applied decimation does not match the selected study point."
+            if not math.isclose(
+                self._series_frequency.value(),
+                float(point["frequency_hz"]),
+                rel_tol=0.0,
+                abs_tol=0.001,
+            ):
+                return "The generator frequency metadata does not match the selected study point."
+            if not self._series_generator_frequency_confirmed.isChecked():
+                return "Confirm that the generator frequency is set to the selected study point."
         return None
 
     def _series_metadata(self, base_path: pathlib.Path) -> dict[str, object]:
         waveform = self._series_waveform_combo.currentData()
-        return {
+        metadata = {
             "measurement_type": self._series_study_combo.currentData(),
             "series_id": base_path.stem,
             "input_condition": self._series_input_combo.currentData(),
@@ -2496,6 +2573,19 @@ class Oscilloscope(QMainWindow):
             "sense_ch1_vpp": int(self._ch1_range_combo.currentData()),
             "sense_ch2_vpp": int(self._ch2_range_combo.currentData()),
         }
+        if self._series_study_combo.currentData() == "decimation":
+            point = self._series_decimation_point_combo.currentData()
+            decimation = int(point["decimation"])
+            effective_sample_rate_hz = ADC_SAMPLE_RATE_HZ / decimation
+            metadata.update(
+                {
+                    "decimation_study_point": self._series_decimation_point_combo.currentText(),
+                    "decimation_study_expected_factor": decimation,
+                    "effective_sample_rate_hz": f"{effective_sample_rate_hz:.12g}",
+                    "expected_samples_per_period": "16",
+                }
+            )
+        return metadata
 
     @staticmethod
     def _series_output_path(
@@ -2532,7 +2622,14 @@ class Oscilloscope(QMainWindow):
         study = str(self._series_study_combo.currentData())
         adc_range = int(self._ch1_range_combo.currentData())
         CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
-        default_path = CAPTURES_DIR / f"{study}_{adc_range}vpp_{timestamp}.csv"
+        if study == "decimation":
+            point = self._series_decimation_point_combo.currentData()
+            default_stem = (
+                f"decimation_{adc_range}vpp_{point['filename_token']}_{timestamp}"
+            )
+        else:
+            default_stem = f"{study}_{adc_range}vpp_{timestamp}"
+        default_path = CAPTURES_DIR / f"{default_stem}.csv"
         selected_path, _ = QFileDialog.getSaveFileName(
             self,
             "Save measurement series",
@@ -2906,11 +3003,21 @@ class Oscilloscope(QMainWindow):
         )
 
     @staticmethod
-    def _display_indices(sample_count: int) -> np.ndarray:
-        """Limit FFT display points without changing the computed spectrum."""
+    def _display_indices(values: np.ndarray) -> np.ndarray:
+        """Limit plot points while retaining spectral peaks and troughs."""
+        values = np.asarray(values)
+        sample_count = len(values)
         if sample_count <= MAX_DISPLAY_POINTS:
             return np.arange(sample_count, dtype=np.int32)
-        return np.linspace(0, sample_count - 1, MAX_DISPLAY_POINTS, dtype=np.int32)
+
+        bucket_count = MAX_DISPLAY_POINTS // 2
+        edges = np.linspace(0, sample_count, bucket_count + 1, dtype=np.int32)
+        selected: list[int] = []
+        for start, stop in zip(edges[:-1], edges[1:]):
+            bucket = values[start:stop]
+            extrema = {start + int(np.argmin(bucket)), start + int(np.argmax(bucket))}
+            selected.extend(sorted(extrema))
+        return np.asarray(selected, dtype=np.int32)
 
     def _update_plot(self):
         latest = None
@@ -3019,7 +3126,7 @@ class Oscilloscope(QMainWindow):
         sample_rate_hz = ADC_SAMPLE_RATE_HZ / self.decimation
         frequencies = np.fft.rfftfreq(sample_count, d=1.0 / sample_rate_hz)[1:]
         window = {
-            "hann": np.hanning(sample_count),
+            "hann": np.hanning(sample_count + 1)[:-1],
             "blackman": np.blackman(sample_count),
         }[self._fft_window]
         coherent_gain = window.mean()
@@ -3034,18 +3141,21 @@ class Oscilloscope(QMainWindow):
                 np.maximum(magnitude[1:] / (ADC_COUNTS / 2), 1e-12)
             )
 
-        indices = self._display_indices(len(frequencies))
         if self.ch1_enabled:
+            levels = spectrum_dbfs(self._raw_to_display_codes(self._ch1_raw))
+            indices = self._display_indices(levels)
             self._curve_ch1.setData(
                 frequencies[indices],
-                spectrum_dbfs(self._raw_to_display_codes(self._ch1_raw))[indices],
+                levels[indices],
                 pen="y",
                 symbol=None,
             )
         if self.ch2_enabled:
+            levels = spectrum_dbfs(self._raw_to_display_codes(self._ch2_raw))
+            indices = self._display_indices(levels)
             self._curve_ch2.setData(
                 frequencies[indices],
-                spectrum_dbfs(self._raw_to_display_codes(self._ch2_raw))[indices],
+                levels[indices],
                 pen="c",
                 symbol=None,
             )

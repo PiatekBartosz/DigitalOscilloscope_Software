@@ -1,0 +1,4 @@
+configuration,sample_rate_hz,tone_hz,level_dbfs_mean,level_dbfs_std,snr_db_mean,snr_db_std,sinad_db_mean,sinad_db_std,enob_mean,enob_std
+harmonics_2vpp_1to1_profile20mVdiv_g49p50,80000000,5000000,-0.699586,0.056958,32.475443,1.257284,32.204586,1.197318,5.057240,0.198890
+harmonics_2vpp_1to1_5MHz_osc_fix_ch1_vga_bypass,80000000,5000000,-0.432178,0.034498,41.932383,0.239658,41.767839,0.229919,6.645820,0.038192
+devikit_clk_test_50MHz,50000000,3125000,-0.469932,0.048376,53.005391,0.409768,52.793939,0.384652,8.477398,0.063896

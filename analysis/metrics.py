@@ -1,15 +1,40 @@
 from __future__ import annotations
 
 import dataclasses
+import matplotlib.pyplot as plt
 
 import numpy as np
 
+def _periodic_window(window_fn, n: int) -> np.ndarray:
+    """Return an n-point periodic window suitable for an n-point DFT."""
+    return window_fn(n + 1)[:-1]
+
+
 _WINDOWS = {
-    "hann": np.hanning,
-    "hamming": np.hamming,
-    "blackman": np.blackman,
+    "hann": lambda n: _periodic_window(np.hanning, n),
+    "hamming": lambda n: _periodic_window(np.hamming, n),
+    "blackman": lambda n: _periodic_window(np.blackman, n),
     "rect": lambda n: np.ones(n),
 }
+
+
+def _nearest_spectral_minimum(power: np.ndarray, peak: int, direction: int) -> int | None:
+    """Return the first local minimum encountered from a spectral peak."""
+    index = peak + direction
+    while 1 <= index < len(power) - 1:
+        if power[index] <= power[index - direction] and power[index] <= power[index + direction]:
+            return index
+        index += direction
+    return None
+
+
+def _tone_bounds(power: np.ndarray, peak: int, fallback: int) -> tuple[int, int]:
+    """Find integration limits at the nearest minima surrounding a tone."""
+    left_min = _nearest_spectral_minimum(power, peak, -1)
+    right_min = _nearest_spectral_minimum(power, peak, 1)
+    left = left_min if left_min is not None else max(peak - fallback, 1)
+    right = right_min if right_min is not None else min(peak + fallback, len(power) - 1)
+    return min(left, peak), max(right, peak)
 
 
 @dataclasses.dataclass
@@ -22,6 +47,7 @@ class SpectralMetrics:
     fundamental_bin: int
     n_harmonics_used: int
     harmonic_levels_dbc: tuple[float, ...]
+    harmonic_levels_dbfs: tuple[float, ...]
     is_coherent: bool
     coherence_margin_db: float
     freqs_hz: np.ndarray
@@ -81,6 +107,8 @@ def compute_noise_metrics(
     window_sum = float(np.sum(win))
     if window_power <= 0.0 or window_sum == 0.0:
         raise ValueError(f"window {window!r} has invalid normalization")
+
+    dbg = centered * win
 
     spectrum = np.fft.rfft(centered * win)
     power_density = np.abs(spectrum) ** 2 / (fs_hz * window_power)
@@ -142,6 +170,7 @@ def compute_metrics(
     if win_fn is None:
         raise ValueError(f"unknown window {window!r}; choose one of {list(_WINDOWS)}")
     win = win_fn(n)
+
     coherent_gain = np.mean(win)
 
     centered = samples - np.mean(samples)
@@ -162,6 +191,7 @@ def compute_metrics(
     is_coherent = bool(coherence_margin_db > 40.0)
 
     spectrum = np.fft.rfft(windowed)
+
     # A one-sided amplitude spectrum needs a factor of two because the
     # negative-frequency half is omitted. Dividing by coherent_gain applies
     # the second factor of about two for a Hann window (coherent gain ~= 0.5).
@@ -180,8 +210,9 @@ def compute_metrics(
     effective_leakage_bins = min(leakage_bins, max_nonoverlap_width)
 
     signal_mask = np.zeros(len(power), dtype=bool)
-    lo = max(fundamental_bin - effective_leakage_bins, 1)
-    hi = min(fundamental_bin + effective_leakage_bins + 1, len(power))
+    signal_lo, signal_hi = _tone_bounds(power, fundamental_bin, effective_leakage_bins)
+    lo = max(signal_lo, 1)
+    hi = min(signal_hi + 1, len(power))
     signal_mask[lo:hi] = True
     signal_power = float(np.sum(power[signal_mask]))
 
@@ -192,8 +223,9 @@ def compute_metrics(
         h_bin = fundamental_bin * k
         if h_bin >= len(power):
             break
-        lo = max(h_bin - effective_leakage_bins, 1)
-        hi = min(h_bin + effective_leakage_bins + 1, len(power))
+        harmonic_lo, harmonic_hi = _tone_bounds(power, h_bin, effective_leakage_bins)
+        lo = max(harmonic_lo, 1)
+        hi = min(harmonic_hi + 1, len(power))
         current_harmonic = np.zeros(len(power), dtype=bool)
         current_harmonic[lo:hi] = True
         current_harmonic &= ~signal_mask
@@ -211,6 +243,12 @@ def compute_metrics(
         )
         for harmonic_power in harmonic_powers
     )
+    full_scale_amplitude = 2.0 ** (n_bits - 1)
+    full_scale_power = full_scale_amplitude**2 / 2.0
+    harmonic_levels_dbfs = tuple(
+        float(10.0 * np.log10(max(harmonic_power, np.finfo(float).tiny) / full_scale_power))
+        for harmonic_power in harmonic_powers
+    )
 
     noise_mask = ~(signal_mask | harmonic_mask)
     noise_mask[0] = False
@@ -223,8 +261,6 @@ def compute_metrics(
     sinad_db = 10.0 * np.log10(signal_power / (noise_power + harmonic_power_total))
     enob = (sinad_db - 1.76) / 6.02
 
-    full_scale_amplitude = 2.0 ** (n_bits - 1)
-    full_scale_power = full_scale_amplitude**2 / 2.0
     noise_floor_dbfs = 10.0 * np.log10(
         (noise_power / noise_bin_count) / full_scale_power
     )
@@ -243,6 +279,7 @@ def compute_metrics(
         fundamental_bin=fundamental_bin,
         n_harmonics_used=n_harmonics_used,
         harmonic_levels_dbc=harmonic_levels_dbc,
+        harmonic_levels_dbfs=harmonic_levels_dbfs,
         is_coherent=is_coherent,
         coherence_margin_db=float(coherence_margin_db),
         freqs_hz=freqs[1:],
@@ -267,8 +304,8 @@ def format_report(metrics: SpectralMetrics, channel_label: str = "CH1") -> str:
         f"ENOB                : {metrics.enob:.2f} bits",
         f"Noise floor         : {metrics.noise_floor_dbfs:.2f} dBFS/bin",
         *(
-            f"H{order}                  : {level:.2f} dBc"
-            for order, level in enumerate(metrics.harmonic_levels_dbc, start=2)
+            f"H{order}                  : {level:.2f} dBFS"
+            for order, level in enumerate(metrics.harmonic_levels_dbfs, start=2)
         ),
         f"Harmonics used      : {metrics.n_harmonics_used}",
         f"Coherent sampling   : {'yes' if metrics.is_coherent else 'NO'} "
